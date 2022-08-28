@@ -7,8 +7,11 @@ import torch
 # import core
 from os import path as osp
 
+import torchvision
 from torch import Tensor
 from torch.nn import functional as F
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
 
 from lbasicsr.data.transforms import mod_crop, as_mod_crop
 from lbasicsr.utils import img2tensor, scandir, tensor2img, imwrite
@@ -374,7 +377,7 @@ def duf_downsample(x, kernel_size=13, scale=4):
 #     return x
 
 
-def arbitrary_scale_downsample(x: Tensor, scale: float = 4.0):
+def arbitrary_scale_downsample(x: Tensor, scale: float = 4.0, mode='core'):
     """Downsamping with arbitrary scale (use bicubic).
 
     :param x: (Tensor) Frames to be downsampled, with shape (b, t, c, h, w).
@@ -398,13 +401,18 @@ def arbitrary_scale_downsample(x: Tensor, scale: float = 4.0):
     # w = round(floor(w / step_w / scale_w) * step_w * scale_w)
     # x = x[..., :h, :w]
 
-    # bicubic downsampling
     x = x.view(-1, c, h, w)
-    # x = imresize(x, sizes=(round(h / scale_h), round(w / scale_w)))
-    x = imresize(x, sizes=(round(h / scale), round(w / scale)))
+    # bicubic downsampling
+    if mode == 'torch':
+        x = T.Resize(size=(round(h/scale), round(w/scale)), interpolation=InterpolationMode.BICUBIC,
+                     antialias=True)(x)
+    elif mode == 'core':
+        x = imresize(x, sizes=(round(h/scale), round(w/scale)))
     x = x.view(b, t, c, x.size(-2), x.size(-1))
+
     if squeeze_flag:
         x = x.squeeze(0)
+
     return x
 
 
