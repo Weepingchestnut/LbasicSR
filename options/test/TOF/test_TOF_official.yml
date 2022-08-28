@@ -8,8 +8,9 @@ datasets:
   test:
     name: Vid4
     type: VideoTestDataset
-    dataroot_gt: datasets/Vid4/GT
-    dataroot_lq: datasets/Vid4/BIx4up_direct
+    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
+    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4up_direct
+#    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
     io_backend:
       type: disk
 
@@ -26,7 +27,7 @@ save_img: true
 
 # path
 path:
-  pretrain_network_g: experiments/pretrained_models/TOF/tof_x4_vimeo90k_official-32c9e01f.pth
+  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/TOF/tof_x4_vimeo90k_official-32c9e01f.pth
   strict_load_g: true
 
 # validation settings
