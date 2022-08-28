@@ -46,11 +46,14 @@ class PairedImageDataset(data.Dataset):
         self.mean = opt['mean'] if 'mean' in opt else None
         self.std = opt['std'] if 'std' in opt else None
 
+        # =======================================================================
+        # 根据 GT 和 LQ 的图像目录读取出相应的文件列表
         self.gt_folder, self.lq_folder = opt['dataroot_gt'], opt['dataroot_lq']
         if 'filename_tmpl' in opt:
             self.filename_tmpl = opt['filename_tmpl']
         else:
             self.filename_tmpl = '{}'
+        # =======================================================================
 
         if self.io_backend_opt['type'] == 'lmdb':
             self.io_backend_opt['db_paths'] = [self.lq_folder, self.gt_folder]
@@ -68,6 +71,8 @@ class PairedImageDataset(data.Dataset):
 
         scale = self.opt['scale']
 
+        # =================================================================
+        # 从存储介质中读取相应的数据到内存的过程
         # Load gt and lq images. Dimension order: HWC; channel order: BGR;
         # image range: [0, 1], float32.
         gt_path = self.paths[index]['gt_path']
@@ -76,6 +81,7 @@ class PairedImageDataset(data.Dataset):
         lq_path = self.paths[index]['lq_path']
         img_bytes = self.file_client.get(lq_path, 'lq')
         img_lq = imfrombytes(img_bytes, float32=True)
+        # =================================================================
 
         # augmentation for training
         if self.opt['phase'] == 'train':
@@ -85,6 +91,7 @@ class PairedImageDataset(data.Dataset):
             # flip, rotation
             img_gt, img_lq = augment([img_gt, img_lq], self.opt['use_hflip'], self.opt['use_rot'])
 
+        # 若有需要，做色彩空间转换
         # color space transform
         if 'color' in self.opt and self.opt['color'] == 'y':
             img_gt = bgr2ycbcr(img_gt, y_only=True)[..., None]
@@ -95,6 +102,7 @@ class PairedImageDataset(data.Dataset):
         if self.opt['phase'] != 'train':
             img_gt = img_gt[0:img_lq.shape[0] * scale, 0:img_lq.shape[1] * scale, :]
 
+        # 将numpy数据格式转换成PyTorch所需的Tensor格式，并根据需要做归一化
         # BGR to RGB, HWC to CHW, numpy to tensor
         img_gt, img_lq = img2tensor([img_gt, img_lq], bgr2rgb=True, float32=True)
         # normalize
@@ -102,6 +110,7 @@ class PairedImageDataset(data.Dataset):
             normalize(img_lq, self.mean, self.std, inplace=True)
             normalize(img_gt, self.mean, self.std, inplace=True)
 
+        # 最后返回一个字典 {输入的LQ图像，作为标签的GT图像，以及其路径}
         return {'lq': img_lq, 'gt': img_gt, 'lq_path': lq_path, 'gt_path': gt_path}
 
     def __len__(self):

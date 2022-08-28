@@ -30,7 +30,7 @@ class VideoBaseModel(SRModel):
                 num_frame_each_folder = Counter(dataset.data_info['folder'])
                 for folder, num_frame in num_frame_each_folder.items():
                     self.metric_results[folder] = torch.zeros(
-                        num_frame, len(self.opt['val']['metrics']), dtype=torch.float32, device='cuda')
+                        num_frame, len(self.opt['val']['metrics']), dtype=torch.float32, device='cuda')     # 记录每一帧的指标
             # initialize the best metric results
             self._initialize_best_metric_results(dataset_name)
         # zero self.metric_results
@@ -44,7 +44,7 @@ class VideoBaseModel(SRModel):
         if rank == 0:
             pbar = tqdm(total=len(dataset), unit='frame')
         for idx in range(rank, len(dataset), world_size):
-            val_data = dataset[idx]
+            val_data = dataset[idx]     # dict{'lq': Tensor TCHW, 'gt': Tensor CHW, 'folder': 'calendar', 'idx': '0/41', border: 1, 'lq_path': str}
             val_data['lq'].unsqueeze_(0)
             val_data['gt'].unsqueeze_(0)
             folder = val_data['folder']

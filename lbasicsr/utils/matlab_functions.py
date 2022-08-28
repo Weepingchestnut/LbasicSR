@@ -176,3 +176,11 @@ def imresize(img, scale, antialiasing=True):
             out_2 = out_2.transpose(1, 2, 0)
 
     return out_2
+
+
+if __name__ == '__main__':
+    # img = torch.rand([3, 720, 576])
+    hr_img = torch.arange(3*720*576).float().view(3, 720, 576)
+    print(hr_img.size())
+    lr_img = imresize(hr_img, 0.25)
+    print(lr_img.size())
