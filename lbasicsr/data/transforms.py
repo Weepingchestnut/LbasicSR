@@ -1,3 +1,5 @@
+from math import floor
+
 import cv2
 import random
 import torch
@@ -18,6 +20,41 @@ def mod_crop(img, scale):
         h, w = img.shape[0], img.shape[1]
         h_remainder, w_remainder = h % scale, w % scale
         img = img[:h - h_remainder, :w - w_remainder, ...]
+    else:
+        raise ValueError(f'Wrong img ndim: {img.ndim}.')
+    return img
+
+
+def cal_step(scale: float):
+    if abs(scale - round(scale)) < 0.001:
+        step = 1
+    elif abs(scale * 2 - round(scale * 2)) < 0.001:
+        step = 2
+    elif abs(scale * 5 - round(scale * 5)) < 0.001:
+        step = 5
+    elif abs(scale * 10 - round(scale * 10)) < 0.001:
+        step = 10
+    elif abs(scale * 20 - round(scale * 20)) < 0.001:
+        step = 20
+
+    return step
+
+
+def as_mod_crop(img, scale):
+    """Mod crop images for arbitrary scale, used during testing.
+
+    :param img: (ndarray) Input Image.
+    :param scale: (float) scale factor.
+    :return: (ndarray): Result image.
+    """
+    step = cal_step(scale)
+
+    img = img.copy()
+    if img.ndim in (2, 3):
+        h, w = img.shape[0], img.shape[1]
+        h = round(floor(h / step / scale) * step * scale)
+        w = round(floor(w / step / scale) * step * scale)
+        img = img[:h, :w, ...]
     else:
         raise ValueError(f'Wrong img ndim: {img.ndim}.')
     return img

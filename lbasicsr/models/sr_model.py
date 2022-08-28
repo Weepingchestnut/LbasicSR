@@ -4,6 +4,7 @@ from os import path as osp
 from tqdm import tqdm
 
 from lbasicsr.archs import build_network
+from lbasicsr.data.core import imresize
 from lbasicsr.losses import build_loss
 from lbasicsr.metrics import calculate_metric
 from lbasicsr.models.base_model import BaseModel
@@ -22,7 +23,7 @@ class SRModel(BaseModel):
         super(SRModel, self).__init__(opt)
 
         # define network
-        self.net_g = build_network(opt['network_g'])    # 根据参数，实例化网络结构
+        self.net_g = build_network(opt['network_g'])
         self.net_g = self.model_to_device(self.net_g)
         self.print_network(self.net_g)
 
@@ -152,7 +153,7 @@ class SRModel(BaseModel):
         else:
             self.net_g.eval()
             with torch.no_grad():
-                self.output = self.net_g(self.lq)
+                self.output = self.net_g(self.lq)   # network influence
             self.net_g.train()
 
     # ==================================
@@ -263,6 +264,13 @@ class SRModel(BaseModel):
     # 得到网络的输出结果。该函数会在 validation 中用到（实际可以简化掉）
     # ==================================================================
     def get_current_visuals(self):
+        if self.output.ndim == 4 and self.output.shape != self.gt.shape:
+            self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
+        if self.output.ndim == 5 and self.output.shape != self.gt.shape:
+            b, t, c, h, w = self.output.size()
+            self.output = self.output.view(-1, c, h, w)
+            self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
+            self.output = self.output.view(b, t, c, self.output.size(-2), self.output.size(-1))
         out_dict = OrderedDict()
         out_dict['lq'] = self.lq.detach().cpu()
         out_dict['result'] = self.output.detach().cpu()

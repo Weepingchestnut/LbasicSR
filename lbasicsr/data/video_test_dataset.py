@@ -3,7 +3,7 @@ import torch
 from os import path as osp
 from torch.utils import data as data
 
-from lbasicsr.data.data_util import duf_downsample, generate_frame_indices, read_img_seq
+from lbasicsr.data.data_util import duf_downsample, generate_frame_indices, read_img_seq, arbitrary_scale_downsample
 from lbasicsr.utils import get_root_logger, scandir
 from lbasicsr.utils.registry import DATASET_REGISTRY
 
@@ -66,7 +66,7 @@ class VideoTestDataset(data.Dataset):
             subfolders_gt = sorted(glob.glob(osp.join(self.gt_root, '*')))
 
         if opt['name'].lower() in ['vid4', 'reds4', 'redsofficial']:
-            for subfolder_lq, subfolder_gt in zip(subfolders_lq, subfolders_gt):
+            for subfolder_lq, subfolder_gt in zip(subfolders_lq, subfolders_gt):    # 循环读取每个视频序列：calendar,city,
                 # get frame list for lq and gt
                 subfolder_name = osp.basename(subfolder_lq)
                 img_paths_lq = sorted(list(scandir(subfolder_lq, full_path=True)))
@@ -80,7 +80,7 @@ class VideoTestDataset(data.Dataset):
                 self.data_info['gt_path'].extend(img_paths_gt)
                 self.data_info['folder'].extend([subfolder_name] * max_idx)
                 for i in range(max_idx):
-                    self.data_info['idx'].append(f'{i}/{max_idx}')
+                    self.data_info['idx'].append(f'{i}/{max_idx}')  # ['0/41', ..., '40/41']
                 border_l = [0] * max_idx
                 for i in range(self.opt['num_frame'] // 2):
                     border_l[i] = 1
@@ -90,8 +90,15 @@ class VideoTestDataset(data.Dataset):
                 # cache data or save the frame list
                 if self.cache_data:
                     logger.info(f'Cache {subfolder_name} for VideoTestDataset...')
-                    self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
-                    self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt)
+                    # ===========================================================
+                    if self.opt['use_arbitrary_scale_downsampling']:
+                        self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
+                        self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt, require_as_mod_crop=True,
+                                                                    scale=self.opt['scale'])
+                    else:
+                        self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
+                        self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt)
+                    # ===========================================================
                 else:
                     self.imgs_lq[subfolder_name] = img_paths_lq
                     self.imgs_gt[subfolder_name] = img_paths_gt
@@ -112,9 +119,9 @@ class VideoTestDataset(data.Dataset):
             img_gt = self.imgs_gt[folder][idx]
         else:
             img_paths_lq = [self.imgs_lq[folder][i] for i in select_idx]
-            imgs_lq = read_img_seq(img_paths_lq)
-            img_gt = read_img_seq([self.imgs_gt[folder][idx]])
-            img_gt.squeeze_(0)
+            imgs_lq = read_img_seq(img_paths_lq)    # torch.Size([7, 3, 144, 180]), device: cpu
+            img_gt = read_img_seq([self.imgs_gt[folder][idx]])      # torch.Size([1, 3, 576, 720])
+            img_gt.squeeze_(0)      # torch.Size([3, 576, 720])
 
         return {
             'lq': imgs_lq,  # (t, c, h, w)
@@ -219,7 +226,7 @@ class VideoTestDUFDataset(VideoTestDataset):
         border = self.data_info['border'][index]
         lq_path = self.data_info['lq_path'][index]
 
-        select_idx = generate_frame_indices(idx, max_idx, self.opt['num_frame'], padding=self.opt['padding'])
+        select_idx = generate_frame_indices(idx, max_idx, self.opt['num_frame'], padding=self.opt['padding'])   # for 0/41: [6, 5, 4, 0, 1, 2, 3]
 
         if self.cache_data:
             if self.opt['use_duf_downsampling']:
@@ -233,12 +240,65 @@ class VideoTestDUFDataset(VideoTestDataset):
             if self.opt['use_duf_downsampling']:
                 img_paths_lq = [self.imgs_gt[folder][i] for i in select_idx]
                 # read imgs_gt to generate low-resolution frames
-                imgs_lq = read_img_seq(img_paths_lq, require_mod_crop=True, scale=self.opt['scale'])
-                imgs_lq = duf_downsample(imgs_lq, kernel_size=13, scale=self.opt['scale'])
+                imgs_lq = read_img_seq(img_paths_lq, require_mod_crop=True, scale=self.opt['scale'])    # torch.Size([7, 3, 576, 720]), [0,1] range, device: cpu
+                imgs_lq = duf_downsample(imgs_lq, kernel_size=13, scale=self.opt['scale'])      # torch.Size([7, 3, 144, 180])
             else:
                 img_paths_lq = [self.imgs_lq[folder][i] for i in select_idx]
                 imgs_lq = read_img_seq(img_paths_lq)
-            img_gt = read_img_seq([self.imgs_gt[folder][idx]], require_mod_crop=True, scale=self.opt['scale'])
+            img_gt = read_img_seq([self.imgs_gt[folder][idx]], require_mod_crop=True, scale=self.opt['scale'])      # torch.Size([1, 3, 576, 720]), device: cpu
+            img_gt.squeeze_(0)      # torch.Size([3, 576, 720])
+
+        return {
+            'lq': imgs_lq,  # (t, c, h, w)
+            'gt': img_gt,  # (c, h, w)
+            'folder': folder,  # folder name
+            'idx': self.data_info['idx'][index],  # e.g., 0/99
+            'border': border,  # 1 for border, 0 for non-border
+            'lq_path': lq_path  # center frame
+        }
+
+
+@DATASET_REGISTRY.register()
+class ASVideoTestDataset(VideoTestDataset):
+    """ Arbitrary scale Video test dataset.
+
+    Args:
+        opt (dict): Config for train dataset.
+            Most of keys are the same as VideoTestDataset.
+            It has the following extra keys:
+
+            use_duf_downsampling (bool): Whether to use duf downsampling to
+                generate low-resolution frames.
+            scale (bool): Scale, which will be added automatically.
+    """
+
+    def __getitem__(self, index):
+        folder = self.data_info['folder'][index]
+        idx, max_idx = self.data_info['idx'][index].split('/')
+        idx, max_idx = int(idx), int(max_idx)
+        border = self.data_info['border'][index]
+        lq_path = self.data_info['lq_path'][index]
+
+        select_idx = generate_frame_indices(idx, max_idx, self.opt['num_frame'], padding=self.opt['padding'])
+
+        if self.cache_data:
+            if self.opt['use_arbitrary_scale_downsampling']:
+                # read imgs_gt to generate arbitrary scale low-resolution frames
+                imgs_lq = self.imgs_gt[folder].index_select(0, torch.LongTensor(select_idx))
+                imgs_lq = arbitrary_scale_downsample(imgs_lq, scale=self.opt['scale'])
+            else:
+                imgs_lq = self.imgs_lq[folder].index_select(0, torch.LongTensor(select_idx))
+            img_gt = self.imgs_gt[folder][idx]
+        else:
+            if self.opt['use_arbitrary_scale_downsampling']:
+                img_paths_lq = [self.imgs_gt[folder][i] for i in select_idx]
+                # read imgs_gt to generate arbitrary scale low-resolution frames
+                imgs_lq = read_img_seq(img_paths_lq, require_as_mod_crop=True, scale=self.opt['scale'])
+                imgs_lq = arbitrary_scale_downsample(imgs_lq, scale=self.opt['scale'])
+            else:
+                img_paths_lq = [self.imgs_lq[folder][i] for i in select_idx]
+                imgs_lq = read_img_seq(img_paths_lq)
+            img_gt = read_img_seq([self.imgs_gt[folder][idx]], require_as_mod_crop=True, scale=self.opt['scale'])
             img_gt.squeeze_(0)
 
         return {
@@ -272,8 +332,45 @@ class VideoRecurrentTestDataset(VideoTestDataset):
         folder = self.folders[index]
 
         if self.cache_data:
-            imgs_lq = self.imgs_lq[folder]
-            imgs_gt = self.imgs_gt[folder]
+            imgs_lq = self.imgs_lq[folder]      # torch.Size([41, 3, 144, 180])
+            imgs_gt = self.imgs_gt[folder]      # torch.Size([41, 3, 576, 720])
+        else:
+            raise NotImplementedError('Without cache_data is not implemented.')
+
+        return {
+            'lq': imgs_lq,
+            'gt': imgs_gt,
+            'folder': folder,
+        }
+
+    def __len__(self):
+        return len(self.folders)
+
+
+@DATASET_REGISTRY.register()
+class ASVideoRecurrentTestDataset(VideoTestDataset):
+    """Video test dataset for recurrent architectures, which takes LR video
+    frames as input and output corresponding HR video frames.
+
+    Args:
+        Same as VideoTestDataset.
+        Unused opt:
+            padding (str): Padding mode.
+
+    """
+
+    def __init__(self, opt):
+        super(ASVideoRecurrentTestDataset, self).__init__(opt)
+        # Find unique folder strings
+        self.folders = sorted(list(set(self.data_info['folder'])))
+
+    def __getitem__(self, index):
+        folder = self.folders[index]
+
+        if self.cache_data:
+            # imgs_lq = self.imgs_lq[folder]      # torch.Size([41, 3, 144, 180])
+            imgs_gt = self.imgs_gt[folder]      # torch.Size([41, 3, 576, 720])
+            imgs_lq = arbitrary_scale_downsample(imgs_gt, scale=self.opt['scale'])
         else:
             raise NotImplementedError('Without cache_data is not implemented.')
 

@@ -1,19 +1,28 @@
+import glob
+from math import floor
+
 import cv2
 import numpy as np
 import torch
+# import core
 from os import path as osp
+
+from torch import Tensor
 from torch.nn import functional as F
 
-from lbasicsr.data.transforms import mod_crop
-from lbasicsr.utils import img2tensor, scandir
+from lbasicsr.data.transforms import mod_crop, as_mod_crop
+from lbasicsr.utils import img2tensor, scandir, tensor2img, imwrite
+from lbasicsr.data.core import imresize
 
 
-def read_img_seq(path, require_mod_crop=False, scale=1, return_imgname=False):
+def read_img_seq(path, require_mod_crop=False, require_as_mod_crop=False, scale=1, return_imgname=False):
     """Read a sequence of images from a given folder path.
 
     Args:
         path (list[str] | str): List of image paths or image folder path.
         require_mod_crop (bool): Require mod crop for each image.
+            Default: False.
+        require_as_mod_crop (bool): Require arbitrary scale mod crop for each image.
             Default: False.
         scale (int): Scale factor for mod_crop. Default: 1.
         return_imgname(bool): Whether return image names. Default False.
@@ -30,6 +39,8 @@ def read_img_seq(path, require_mod_crop=False, scale=1, return_imgname=False):
 
     if require_mod_crop:
         imgs = [mod_crop(img, scale) for img in imgs]
+    if require_as_mod_crop:
+        imgs = [as_mod_crop(img, scale) for img in imgs]
     imgs = img2tensor(imgs, bgr2rgb=True, float32=True)
     imgs = torch.stack(imgs, dim=0)
 
@@ -311,3 +322,158 @@ def duf_downsample(x, kernel_size=13, scale=4):
     if squeeze_flag:
         x = x.squeeze(0)
     return x
+
+
+# def cal_step(scale: float):
+#     if abs(scale - round(scale)) < 0.001:
+#         step = 1
+#     elif abs(scale * 2 - round(scale * 2)) < 0.001:
+#         step = 2
+#     elif abs(scale * 5 - round(scale * 5)) < 0.001:
+#         step = 5
+#     elif abs(scale * 10 - round(scale * 10)) < 0.001:
+#         step = 10
+#     elif abs(scale * 20 - round(scale * 20)) < 0.001:
+#         step = 20
+#
+#     return step
+
+
+# def img_crop_bd(x, scale_h, scale_w):
+#     step_h = cal_step(scale_h)
+#     step_w = cal_step(scale_w)
+#
+#     # crop borders
+#     H, W = x.size(-2), x.size(-1)
+#     H = round(floor(H / step_h / scale_h) * step_h * scale_h)
+#     W = round(floor(W / step_w / scale_w) * step_w * scale_w)
+#     # print("after crop borders, H = {}, W = {}".format(H, W))
+#     x = x[..., :H, :W]
+#
+#     return x
+
+
+# def arbitrary_scale_downsample(x: Tensor, scale: float = 4.0):
+#     """Downsamping with arbitrary scale (use bicubic).
+#
+#     Args:
+#         x (Tensor): Frames to be downsampled, with shape (b, t, c, h, w).
+#         scale (int): Downsampling factor. Supported arbitrary scale.
+#             Default: 4.0.
+#     """
+#     squeeze_flag = False
+#     if x.ndim == 4:
+#         squeeze_flag = True
+#         x = x.unsqueeze(0)
+#     b, t, c, h, w = x.size()
+#     x = x.view(-1, h, w)
+#     x = imresize(x, 1/scale)
+#
+#     x = x.view(b, t, c, x.size(1), x.size(2))
+#
+#     return x
+
+
+def arbitrary_scale_downsample(x: Tensor, scale: float = 4.0):
+    """Downsamping with arbitrary scale (use bicubic).
+
+    :param x: (Tensor) Frames to be downsampled, with shape (b, t, c, h, w).
+    :param scale: (float) Downsampling factor. Supported arbitrary scale.
+    :return:
+        (Tensor) Arbitrary scale downsampled frames.
+    """
+    # if torch.cuda.is_available() and (not x.is_cuda):
+    #     x = x.cuda()
+    squeeze_flag = False
+    if x.ndim == 4:
+        squeeze_flag = True
+        x = x.unsqueeze(0)
+
+    # step_h = cal_step(scale_h)
+    # step_w = cal_step(scale_w)
+
+    # crop borders
+    b, t, c, h, w = x.size()
+    # h = round(floor(h / step_h / scale_h) * step_h * scale_h)
+    # w = round(floor(w / step_w / scale_w) * step_w * scale_w)
+    # x = x[..., :h, :w]
+
+    # bicubic downsampling
+    x = x.view(-1, c, h, w)
+    # x = imresize(x, sizes=(round(h / scale_h), round(w / scale_w)))
+    x = imresize(x, sizes=(round(h / scale), round(w / scale)))
+    x = x.view(b, t, c, x.size(-2), x.size(-1))
+    if squeeze_flag:
+        x = x.squeeze(0)
+    return x
+
+
+def downsample_visual():
+    # init
+    gt_root = '/data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT'
+    save_path = '/data2/lzk_data/workspace/LbasicSR/datasets/Vid4/arbitrary_scale'
+    subfolers_gt = sorted(glob.glob(osp.join(gt_root, '*')))
+    scale = 3.3
+
+    for subfoler_gt in subfolers_gt:
+        subfoler_name = osp.basename(subfoler_gt)
+        print(subfoler_name)
+        img_paths_gt = sorted(list(scandir(subfoler_gt, full_path=True)))
+
+        max_id = len(img_paths_gt)
+        print(max_id)
+        # print(img_paths_gt)
+        imgs_gt = read_img_seq(img_paths_gt, require_as_mod_crop=True, scale=scale)    # Tensor [41, 3, 576, 720], [0, 1] range
+        print(imgs_gt.size())
+        imgs_gt = imgs_gt.unsqueeze(0)
+        print(imgs_gt.size())
+
+        imgs_lr = arbitrary_scale_downsample(imgs_gt, scale)
+        print(imgs_lr.size())
+
+        i = 0
+        for img_path_gt in img_paths_gt:
+            img_name = osp.splitext(osp.basename(img_path_gt))[0]
+            save_img_path = osp.join(save_path, f'x{scale}', subfoler_name, f'{img_name}.png')
+            img_lr = imgs_lr[:, i, ...]     # 按帧取
+            result_img_lr = tensor2img(img_lr)
+            print('{}/{}: {}'.format(i + 1, len(img_paths_gt), save_img_path))
+            imwrite(result_img_lr, save_img_path)
+            i = i + 1
+        print('='*100)
+
+
+if __name__ == '__main__':
+    # hr_img = torch.randn([1, 7, 3, 720, 576])
+    # print(hr_img.size())
+    # lr_img = arbitrary_scale_downsample(hr_img, 4.0)
+    # print(lr_img.size())
+
+    # ======================
+    downsample_visual()
+    # ======================
+
+    # ==================================
+    # scales = np.linspace(11, 40, 30)
+    # print(scales)
+    # scales = scales / 10
+    # print(scales)
+    # print(type(scales))
+    # for scale in scales:
+    #     print("scale =", scale)
+    #     step = cal_step(scale)
+    #     print(step)
+    #     print("="*50)
+    # ==================================
+
+
+
+
+
+
+
+
+
+
+
+
