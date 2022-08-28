@@ -36,7 +36,8 @@ def test_pipeline(root_path):
 
     for test_loader in test_loaders:
         test_set_name = test_loader.dataset.opt['name']
-        logger.info(f'Testing {test_set_name}...')
+        test_scale = opt['scale']
+        logger.info(f'Testing {test_set_name} x{test_scale}...')
         model.validation(test_loader, current_iter=opt['name'], tb_logger=None, save_img=opt['val']['save_img'])
 
 
