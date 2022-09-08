@@ -264,6 +264,8 @@ class SRModel(BaseModel):
     # 得到网络的输出结果。该函数会在 validation 中用到（实际可以简化掉）
     # ==================================================================
     def get_current_visuals(self):
+        # if type(self.output) is not torch.Tensor:
+        #     self.output = self.output[0]
         if self.output.ndim == 4 and self.output.shape != self.gt.shape:
             self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
         if self.output.ndim == 5 and self.output.shape != self.gt.shape:

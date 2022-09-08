@@ -146,11 +146,11 @@ class TSAFusion(nn.Module):
         Returns:
             Tensor: Features after TSA with the shape (b, c, h, w).
         """
-        b, t, c, h, w = aligned_feat.size()
+        b, t, c, h, w = aligned_feat.size()     # torch.Size([32, 5, 64, 64, 64])
         # temporal attention
-        embedding_ref = self.temporal_attn1(aligned_feat[:, self.center_frame_idx, :, :, :].clone())
-        embedding = self.temporal_attn2(aligned_feat.view(-1, c, h, w))
-        embedding = embedding.view(b, t, -1, h, w)  # (b, t, c, h, w)
+        embedding_ref = self.temporal_attn1(aligned_feat[:, self.center_frame_idx, :, :, :].clone())    # torch.Size([32, 64, 64, 64])
+        embedding = self.temporal_attn2(aligned_feat.view(-1, c, h, w))     # torch.Size([160, 64, 64, 64])
+        embedding = embedding.view(b, t, -1, h, w)  # (b, t, c, h, w) torch.Size([32, 5, 64, 64, 64])
 
         corr_l = []  # correlation list
         for i in range(t):
@@ -330,7 +330,7 @@ class EDVR(nn.Module):
         else:
             assert h % 4 == 0 and w % 4 == 0, ('The height and width must be multiple of 4.')
 
-        x_center = x[:, self.center_frame_idx, :, :, :].contiguous()
+        x_center = x[:, self.center_frame_idx, :, :, :].contiguous()    # torch.Size([32, 3, 64, 64])
 
         # extract features for each frame
         # L1
@@ -349,13 +349,14 @@ class EDVR(nn.Module):
         feat_l3 = self.lrelu(self.conv_l3_1(feat_l2))
         feat_l3 = self.lrelu(self.conv_l3_2(feat_l3))
 
-        feat_l1 = feat_l1.view(b, t, -1, h, w)
-        feat_l2 = feat_l2.view(b, t, -1, h // 2, w // 2)
-        feat_l3 = feat_l3.view(b, t, -1, h // 4, w // 4)
+        feat_l1 = feat_l1.view(b, t, -1, h, w)      # torch.Size([32, 5, 64, 64, 64])
+        feat_l2 = feat_l2.view(b, t, -1, h // 2, w // 2)    # torch.Size([32, 5, 64, 32, 32])
+        feat_l3 = feat_l3.view(b, t, -1, h // 4, w // 4)    # torch.Size([32, 5, 64, 16, 16])
 
         # PCD alignment
         ref_feat_l = [  # reference feature list
-            feat_l1[:, self.center_frame_idx, :, :, :].clone(), feat_l2[:, self.center_frame_idx, :, :, :].clone(),
+            feat_l1[:, self.center_frame_idx, :, :, :].clone(),     # torch.Size([32, 64, 64, 64])
+            feat_l2[:, self.center_frame_idx, :, :, :].clone(),
             feat_l3[:, self.center_frame_idx, :, :, :].clone()
         ]
         aligned_feat = []
@@ -364,7 +365,7 @@ class EDVR(nn.Module):
                 feat_l1[:, i, :, :, :].clone(), feat_l2[:, i, :, :, :].clone(), feat_l3[:, i, :, :, :].clone()
             ]
             aligned_feat.append(self.pcd_align(nbr_feat_l, ref_feat_l))
-        aligned_feat = torch.stack(aligned_feat, dim=1)  # (b, t, c, h, w)
+        aligned_feat = torch.stack(aligned_feat, dim=1)  # (b, t, c, h, w) torch.Size([32, 5, 64, 64, 64])
 
         if not self.with_tsa:
             aligned_feat = aligned_feat.view(b, -1, h, w)

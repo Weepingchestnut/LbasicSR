@@ -10,7 +10,7 @@ from lbasicsr.utils import get_root_logger
 from lbasicsr.utils.dist_util import master_only
 
 
-class BaseModel():
+class BaseModel:
     """Base model."""
 
     def __init__(self, opt):
@@ -103,6 +103,18 @@ class BaseModel():
     def get_optimizer(self, optim_type, params, lr, **kwargs):
         if optim_type == 'Adam':
             optimizer = torch.optim.Adam(params, lr, **kwargs)
+        elif optim_type == 'AdamW':
+            optimizer = torch.optim.AdamW(params, lr, **kwargs)
+        elif optim_type == 'Adamax':
+            optimizer = torch.optim.Adamax(params, lr, **kwargs)
+        elif optim_type == 'SGD':
+            optimizer = torch.optim.SGD(params, lr, **kwargs)
+        elif optim_type == 'ASGD':
+            optimizer = torch.optim.ASGD(params, lr, **kwargs)
+        elif optim_type == 'RMSprop':
+            optimizer = torch.optim.RMSprop(params, lr, **kwargs)
+        elif optim_type == 'Rprop':
+            optimizer = torch.optim.Rprop(params, lr, **kwargs)
         else:
             raise NotImplementedError(f'optimizer {optim_type} is not supperted yet.')
         return optimizer
@@ -149,7 +161,7 @@ class BaseModel():
         logger.info(net_str)
 
     def _set_lr(self, lr_groups_l):
-        """Set learning rate for warmup.
+        """Set learning rate for warm-up.
 
         Args:
             lr_groups_l (list): List for lr_groups, each for an optimizer.
@@ -171,7 +183,7 @@ class BaseModel():
 
         Args:
             current_iter (int): Current iteration.
-            warmup_iter (int)： Warmup iter numbers. -1 for no warmup.
+            warmup_iter (int)： Warm-up iter numbers. -1 for no warm-up.
                 Default： -1.
         """
         if current_iter > 1:

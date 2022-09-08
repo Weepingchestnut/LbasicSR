@@ -1,6 +1,6 @@
-name: Bicubic_core_x1.1_Vid4
+name: Bicubic_core_x4_Vid4
 model_type: VideoRecurrentModel
-scale: 1.1
+scale: 4
 num_gpu: 1  # 4  # set num_gpu: 0 for cpu mode
 manual_seed: 0
 
@@ -8,7 +8,7 @@ datasets:
   test:
     name: Vid4
 #    type: VideoTestDataset
-    type: ASVideoRecurrentTestDataset
+    type: VideoRecurrentTestDataset
     dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
     dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
     cache_data: true
@@ -16,11 +16,13 @@ datasets:
       type: disk
     num_frame: -1
     use_arbitrary_scale_downsampling: true
+    downsampling_mode: core
 
 # network structures
 network_g:
   type: BicubicVSR
-  scale: 1.1
+  scale: 4
+  bicubic_mode: core
 
 # path
 path:

@@ -1,34 +1,42 @@
-name: BasicVSR_Vid4_BIx1.9_core
-model_type: VideoRecurrentModel
-scale: 1.9
+# general settings
+name: STAN_Vid4_BIx4
+model_type: STANModel
+scale: 4
 num_gpu: 1  # set num_gpu: 0 for cpu mode
 manual_seed: 0
 
+# dataset and data loader settings
 datasets:
-  test_1:  # the 1st test dataset
+  test_1:
     name: Vid4
-    type: ASVideoRecurrentTestDataset
+    type: VideoTestDataset
     dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
     dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
-    cache_data: true
     io_backend:
       type: disk
-    num_frame: -1
-    use_arbitrary_scale_downsampling: true
-    downsampling_mode: 'core'
 
+    cache_data: false
+    num_frame: 7
+    padding: reflection
 
 # network structures
 network_g:
-  type: BasicVSR
+  type: STAN
+  num_in_ch: 3
   num_feat: 64
-  num_block: 30
-  spynet_path: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  num_frame: 7
+  n_resgroups: 10
+  n_resblocks: 20
+  reduction: 16
+  center_frame_idx: ~
+  scale: 4
+  res_scale: 1
 
 # path
 path:
-  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/BasicVSR/BasicVSR_Vimeo90K_BIx4-2a29695a.pth
+  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/STAN_Vimeo90K_BIx4/models/net_g_500.pth
   strict_load_g: true
+  resume_state: ~
 
 # validation settings
 val:
@@ -36,11 +44,11 @@ val:
   suffix: ~  # add suffix to saved images, if None, use exp name
 
   metrics:
-    psnr: # metric name, can be arbitrary
+    psnr_y: # metric name, can be arbitrary
       type: calculate_psnr
       crop_border: 0
       test_y_channel: true
-    ssim:
+    ssim_y:
       type: calculate_ssim
       crop_border: 0
       test_y_channel: true

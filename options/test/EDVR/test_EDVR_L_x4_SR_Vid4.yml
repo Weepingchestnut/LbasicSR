@@ -18,6 +18,7 @@ datasets:
     num_frame: 7
     padding: reflection_circle
     use_arbitrary_scale_downsampling: true
+    downsampling_mode: core
 
 # network structures
 network_g:
