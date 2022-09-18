@@ -6,40 +6,8 @@ from torch import nn as nn
 
 from lbasicsr.utils.registry import ARCH_REGISTRY
 from torch.nn.modules.utils import _triple
-from .FAC.kernelconv2d import KernelConv2D
-
-
-# def conv(batchnorm=False, in_planes=64, out_planes=64, kernel_size=3, stride=1):
-#     if batchnorm:
-#         return nn.Sequential(
-#             nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2,
-#                       bias=False),
-#             nn.BatchNorm2d(out_planes),
-#             nn.LeakyReLU(0.1, inplace=True)
-#         )
-#     else:
-#         return nn.Sequential(
-#             nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size - 1) // 2,
-#                       bias=True),
-#             nn.LeakyReLU(0.1, inplace=True)
-#         )
-
-
-# class ResnetBlock(nn.Module):
-#     def __init__(self, in_channels, kernel_size, dilation, bias):
-#         super(ResnetBlock, self).__init__()
-#         self.stem = nn.Sequential(
-#             nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, stride=1, dilation=dilation[0],
-#                       padding=((kernel_size - 1) // 2) * dilation[0], bias=bias),
-#             nn.LeakyReLU(0.1, inplace=True),
-#             nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, stride=1, dilation=dilation[1],
-#                       padding=((kernel_size - 1) // 2) * dilation[1], bias=bias),
-#         )
-#
-#     def forward(self, x):
-#         out = self.stem(x) + x
-#         return out
-from .arch_util import make_layer, Upsample
+# from .FAC.kernelconv2d import KernelConv2D
+from lbasicsr.archs.arch_util import make_layer, Upsample
 
 
 class ResnetBlock(nn.Module):
@@ -54,27 +22,6 @@ class ResnetBlock(nn.Module):
     def forward(self, x):
         out = self.stem(x) + x
         return out
-
-
-# def resnet_block(in_channels, kernel_size=3, dilation=[1, 1], bias=True):
-#     return ResnetBlock(in_channels, kernel_size, dilation, bias=bias)
-
-
-# class CALayer(nn.Module):
-#     def __init__(self, channel, reduction=16):
-#         super(CALayer, self).__init__()
-#         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-#         self.conv_du = nn.Sequential(
-#             nn.Conv2d(channel, channel // reduction, 1, padding=0, bias=True),
-#             nn.ReLU(inplace=True),
-#             nn.Conv2d(channel // reduction, channel, 1, padding=0, bias=True),
-#             nn.Sigmoid()
-#         )
-#
-#     def forward(self, x):
-#         y = self.avg_pool(x)
-#         y = self.conv_du(y)
-#         return x * y
 
 
 class ChannelAttention(nn.Module):
@@ -98,27 +45,6 @@ class ChannelAttention(nn.Module):
     def forward(self, x):
         y = self.attention(x)
         return x * y
-
-
-# class RCAB(nn.Module):
-#     def __init__(self, conv, n_feat, kernel_size, reduction, bias=True, bn=False, act=nn.ReLU(True), res_scale=1):
-#         super(RCAB, self).__init__()
-#         modules_body = []
-#         for i in range(2):
-#             modules_body.append(conv(n_feat, n_feat, kernel_size, bias=bias))
-#             if bn:
-#                 modules_body.append(nn.BatchNorm2d(n_feat))
-#             if i == 0:
-#                 modules_body.append(act)
-#         modules_body.append(CALayer(n_feat, reduction))
-#         self.body = nn.Sequential(*modules_body)
-#         self.res_scale = res_scale
-#
-#     def forward(self, x):
-#         res = self.body(x)
-#         # res = self.body(x).mul(self.res_scale)
-#         res += x
-#         return res
 
 
 class RCAB(nn.Module):
@@ -146,22 +72,6 @@ class RCAB(nn.Module):
         return res + x
 
 
-# class ResidualGroup(nn.Module):
-#     def __init__(self, conv, n_feat, kernel_size, reduction, act, res_scale, n_resblocks):
-#         super(ResidualGroup, self).__init__()
-#         modules_body = []
-#         modules_body = [
-#             RCAB(conv, n_feat, kernel_size, reduction, bias=True, bn=False, act=nn.ReLU(True), res_scale=1)
-#             for _ in range(n_resblocks)]
-#         modules_body.append(conv(n_feat, n_feat, kernel_size))
-#         self.body = nn.Sequential(*modules_body)
-#
-#     def forward(self, x):
-#         res = self.body(x)
-#         res += x
-#         return res
-
-
 class ResidualGroup(nn.Module):
     """Residual Group of RCAB.
 
@@ -184,40 +94,12 @@ class ResidualGroup(nn.Module):
         return res + x
 
 
-# class Upsampler(nn.Sequential):
-#     def __init__(self, conv, scale, n_feat, bn=False, act=False, bias=True):
-#         m = []
-#         if (scale & (scale - 1)) == 0:  # Is scale = 2^n?
-#             for _ in range(int(math.log(scale, 2))):
-#                 m.append(conv(n_feat, 4 * n_feat, 3, bias))
-#                 m.append(nn.PixelShuffle(2))
-#                 if bn:
-#                     m.append(nn.BatchNorm2d(n_feat))
-#                 if act:
-#                     m.append(act())
-#         elif scale == 3:
-#             m.append(conv(n_feat, 9 * n_feat, 3, bias))
-#             m.append(nn.PixelShuffle(3))
-#             if bn:
-#                 m.append(nn.BatchNorm2d(n_feat))
-#             if act:
-#                 m.append(act())
-#         else:
-#             raise NotImplementedError
-#
-#         super(Upsampler, self).__init__(*m)
-
-
 def conv2dlrelu(in_channels, out_channels, kernel_size=3, stride=1, dilation=1, bias=True):
     return nn.Sequential(
         nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride,
                   padding=((kernel_size-1)//2)*dilation, dilation=dilation, bias=bias),
         nn.LeakyReLU(0.1, inplace=True)
     )
-
-
-# def default_conv(in_channels, out_channels, kernel_size, bias=True):
-#     return nn.Conv2d(in_channels, out_channels, kernel_size, padding=(kernel_size // 2), bias=bias)
 
 
 class RouteFuncMLP(nn.Module):
@@ -258,13 +140,13 @@ class RouteFuncMLP(nn.Module):
         self.b.weight.data.zero_()
 
     def forward(self, x):
-        g = self.globalpool(x)      # B x 64 x H x W => torch.Size([4, 1, 1, 1])
-        x = self.avgpool(x)         # torch.Size([4, 64, 1, 1])
+        g = self.globalpool(x)      # torch.Size([4, 64, 1, 1, 1])
+        x = self.avgpool(x)         # torch.Size([4, 64, 7, 1, 1])
         x = self.a(x + self.g(g))
         x = self.bn(x)
         x = self.relu(x)
         x = self.b(x) + 1
-        return x
+        return x    # torch.Size([4, 64, 7, 1, 1])
 
 
 class TadaConv2d(nn.Module):
@@ -326,18 +208,19 @@ class TadaConv2d(nn.Module):
     def forward(self, x, alpha):
         """
         Args:
-            :param x:
-            :param alpha:
+            :param x: feature to perform convolution on.
+            :param alpha: calibration weight for the base weights.
+                W_t = alpha_t * W_b
             :return:
         """
-        _, _, c_out, c_in, kh, kw = self.weight.size()
+        _, _, c_out, c_in, kh, kw = self.weight.size()      # torch.Size([1, 1, 64, 64, 3, 3])
         b, c_in, t, h, w = x.size()
-        x = x.permute(0, 2, 1, 3, 4).reshape(1, -1, h, w)
+        x = x.permute(0, 2, 1, 3, 4).reshape(1, -1, h, w)   # torch.Size([1, 1792, 32, 32])
 
         if self.cal_dim == 'cin':
             # w_alpha: B, C, T, H(1), W(1) -> B, T, C, H(1), W(1) -> B, T, 1, C, H(1), W(1)
             # corresponding to calibrating the input channel
-            weight = (alpha.permute(0, 2, 1, 3, 4).unsqueeze(2) * self.weight).reshape(-1, c_in // self.groups, kh, kw)
+            weight = (alpha.permute(0, 2, 1, 3, 4).unsqueeze(2) * self.weight).reshape(-1, c_in // self.groups, kh, kw)     # torch.Size([1792, 64, 3, 3])
         elif self.cal_dim == "cout":
             # w_alpha: B, C, T, H(1), W(1) -> B, T, C, H(1), W(1) -> B, T, C, 1, H(1), W(1)
             # corresponding to calibrating the input channel
@@ -351,7 +234,7 @@ class TadaConv2d(nn.Module):
             bias = self.bias.repeat(b, t, 1).reshape(-1)
         output = F.conv2d(
             x, weight=weight, bias=bias, stride=self.stride[1:], padding=self.padding[1:],
-            dilation=self.dilation[1:], groups=self.groups * b * t)
+            dilation=self.dilation[1:], groups=self.groups * b * t)     # torch.Size([1, 1792, 30, 30])
 
         output = output.view(b, t, c_out, output.size(-2), output.size(-1)).permute(0, 2, 1, 3, 4)
 
@@ -470,4 +353,20 @@ class STAN(nn.Module):
 
 
 if __name__ == '__main__':
-    pass
+    batch_size = 4
+    frame_num = 7
+    num_feature = 64
+    x = torch.randn((batch_size, num_feature, frame_num, 32, 32))
+
+    conv_rf = RouteFuncMLP(c_in=64, ratio=4, kernels=[3, 3])
+    conv = TadaConv2d(
+        in_channels=64,
+        out_channels=64,
+        kernel_size=[1, 3, 3],
+        stride=[1, 1, 1],
+        bias=False,
+        cal_dim='cin'
+    )
+
+    out = conv(x, conv_rf(x))
+

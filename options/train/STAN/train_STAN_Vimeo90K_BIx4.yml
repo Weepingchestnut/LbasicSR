@@ -60,7 +60,8 @@ network_g:
 path:
   pretrain_network_g: ~
   strict_load_g: true
-  resume_state: /data2/lzk_data/workspace/LbasicSR/experiments/STAN_Vimeo90K_BIx4/training_states/5000.state
+  resume_state: ~   # /data2/lzk_data/workspace/LbasicSR/experiments/STAN_Vimeo90K_BIx4/training_states/150000.state
+  new_train_setting: true
 
 # training settings
 train:
@@ -74,7 +75,7 @@ train:
   scheduler:
     type: CosineAnnealingRestartLR
     periods: [ 150000, 150000, 150000, 150000 ]
-    restart_weights: [ 1, 1, 1, 1 ]
+    restart_weights: [ 1, 0.5, 0.5, 0.5 ]
     eta_min: !!float 1e-7
 
   total_iter: 600000

@@ -87,6 +87,9 @@ def load_resume_state(opt):
     else:
         device_id = torch.cuda.current_device()
         resume_state = torch.load(resume_state_path, map_location=lambda storage, loc: storage.cuda(device_id))
+        if opt['path'].get('new_train_setting'):
+            print('new train setting')
+            # resume_state['schedulers'][0][]
         check_resume(opt, resume_state['iter'])
     return resume_state
 
