@@ -21,9 +21,9 @@ class BicubicVSR(nn.Module):
 
         x = x.view(-1, c, h, w)
         if self.bicubic_mode == 'core':
-            x = imresize(x, sizes=(round(h*self.scale), round(w*self.scale)))
+            x = imresize(x, sizes=(round(h*self.scale[0]), round(w*self.scale[1])))
         elif self.bicubic_mode == 'torch':
-            x = torchvision.transforms.Resize(size=(round(h*self.scale), round(w*self.scale)),
+            x = torchvision.transforms.Resize(size=(round(h*self.scale[0]), round(w*self.scale[1])),
                                               interpolation=InterpolationMode.BICUBIC,
                                               antialias=True)(x)
         x = x.view(b, t, c, x.size(-2), x.size(-1))
