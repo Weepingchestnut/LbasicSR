@@ -1,0 +1,110 @@
+#### general settings
+name: VideoINR_official
+#use_tb_logger: false #true
+#model: VideoSR_base
+model_type: VideoBaseModel
+#distortion: sr
+scale: 4
+#gpu_ids: [0, 1, 2, 3, 4, 5, 6, 7]
+num_gpu: 1  # 8  # set num_gpu: 0 for cpu mode
+
+#### datasets
+datasets:
+#  train:
+#    name: Adobe
+#    mode: Adobe # Adobe & Adobe_a
+#    interval_list: [1]
+#    random_reverse: true #false
+#    border_mode: false
+#    dataroot_GT: /home/users/adobe240/frame/train
+#    dataroot_LQ: /home/users/adobe240/frame/train
+#    cache_keys: Vimeo7_train_keys.pkl
+#
+#    N_frames: 7
+#    use_shuffle: true
+#    n_workers: 3  # per GPU
+#    batch_size: 24
+#    GT_size: 128
+#    LQ_size: 32
+#    use_flip: true
+#    use_rot: true
+#    color: RGB
+  test_as:
+    name: Vid4
+    type: ASVideoTestDataset
+    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
+    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
+    io_backend:
+      type: disk
+
+    cache_data: false
+    num_frame: 7
+    padding: reflection_circle
+    #    use_duf_downsampling: true
+    use_arbitrary_scale_downsampling: true
+    downsampling_mode: torch
+
+#### network structures
+network_g:
+#  which_model_G: LIIF # LunaTokis & LIIF
+#  nf: 64
+#  nframes: 7
+#  groups: 8
+#  front_RBs: 5
+#  mid_RBs: 0
+#  back_RBs: 40
+#  HR_in: false
+  type: LunaTokis
+  nf: 64
+  nframes: 6
+  groups: 8
+  front_RBs: 5
+  back_RBs: 40
+
+#### path
+path:
+#  pretrain_model_G: ~
+#  strict_load: false #true #
+#  resume_state: ~
+#  models: /saved_checkpoints/
+#  training_state: /saved_checkpoints/
+  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/VideoINR/latest_G.pth
+  strict_load_g: true
+
+#### training settings: learning rate scheme, loss
+#train:
+#  lr_G: !!float 1e-4
+#  lr_scheme: CosineAnnealingLR_Restart
+#  beta1: 0.9
+#  beta2: 0.99
+#  niter: 600000
+#  warmup_iter: -1 #4000  # -1: no warm up
+#  T_period: [150000, 150000, 150000, 150000]
+#  restarts: [150000, 300000, 450000]
+#  restart_weights: [1, 1, 1]
+#  eta_min: !!float 1e-7
+#
+#  pixel_criterion: cb
+#  pixel_weight: 1.0
+#  val_freq: !!float 5e3
+#
+#  manual_seed: 0
+#
+##### logger
+#logger:
+#  print_freq: 100
+#  save_checkpoint_freq: !!float 4e3
+# validation settings
+val:
+  save_img: true
+  suffix: ~  # add suffix to saved images, if None, use exp name
+
+  metrics:
+    psnr_y: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: true
+    ssim_y:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: true

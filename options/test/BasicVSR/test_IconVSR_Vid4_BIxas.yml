@@ -1,4 +1,4 @@
-name: BasicVSR_Vid4_BIx[4, 1.4]_torch
+name: IconVSR_Vid4_BIx[4, 1.4]_torch
 model_type: VideoRecurrentModel
 scale: !!python/tuple [4, 1.4]
 num_gpu: 1  # set num_gpu: 0 for cpu mode
@@ -20,19 +20,24 @@ datasets:
 
 # network structures
 network_g:
-  type: BasicVSR
+  type: IconVSR
   num_feat: 64
   num_block: 30
+  keyframe_stride: 5
+  temporal_padding: 3
   spynet_path: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  edvr_path: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/BasicVSR/EDVR_Vimeo90K_pretrained_for_IconVSR-ee48ee92.pth
 
 # path
 path:
-  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/BasicVSR/BasicVSR_Vimeo90K_BIx4-2a29695a.pth
+  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/BasicVSR/IconVSR_Vimeo90K_BIx4-35fec07c.pth
   strict_load_g: true
 
 # validation settings
 val:
   save_img: true
+#  flip_seq: true
+#  center_frame_only: true
   suffix: ~  # add suffix to saved images, if None, use exp name
 
   metrics:
