@@ -1,6 +1,9 @@
-import torch
 from collections import OrderedDict
 from os import path as osp
+
+import torch
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
 from tqdm import tqdm
 
 from lbasicsr.archs import build_network
@@ -105,6 +108,8 @@ class SRModel(BaseModel):
         self.lq = data['lq'].to(self.device)
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
+        if 'scale' in data:
+            self.scale = data['scale']
 
     # =======================================================================
     # 优化参数，即一个完整的 train step，包括forward，loss计算，backward，参数优化等
@@ -155,6 +160,54 @@ class SRModel(BaseModel):
             with torch.no_grad():
                 self.output = self.net_g(self.lq)   # network influence
             self.net_g.train()
+
+    def test_selfensemble(self):
+        # TODO: to be tested
+        # 8 augmentations
+        # modified from https://github.com/thstkdgus35/EDSR-PyTorch
+
+        def _transform(v, op):
+            # if self.precision != 'single': v = v.float()
+            v2np = v.data.cpu().numpy()
+            if op == 'v':
+                tfnp = v2np[:, :, :, ::-1].copy()
+            elif op == 'h':
+                tfnp = v2np[:, :, ::-1, :].copy()
+            elif op == 't':
+                tfnp = v2np.transpose((0, 1, 3, 2)).copy()
+
+            ret = torch.Tensor(tfnp).to(self.device)
+            # if self.precision == 'half': ret = ret.half()
+
+            return ret
+
+        # prepare augmented data
+        lq_list = [self.lq]
+        for tf in 'v', 'h', 't':
+            lq_list.extend([_transform(t, tf) for t in lq_list])
+
+        # inference
+        if hasattr(self, 'net_g_ema'):
+            self.net_g_ema.eval()
+            with torch.no_grad():
+                out_list = [self.net_g_ema(aug) for aug in lq_list]
+        else:
+            self.net_g.eval()
+            with torch.no_grad():
+                out_list = [self.net_g_ema(aug) for aug in lq_list]
+            self.net_g.train()
+
+        # merge results
+        for i in range(len(out_list)):
+            if i > 3:
+                out_list[i] = _transform(out_list[i], 't')
+            if i % 4 > 1:
+                out_list[i] = _transform(out_list[i], 'h')
+            if (i % 4) % 2 == 1:
+                out_list[i] = _transform(out_list[i], 'v')
+        output = torch.cat(out_list, dim=0)
+
+        self.output = output.mean(dim=0, keepdim=True)
 
     # ==================================
     # validation 的流程（多卡 dist）
@@ -264,14 +317,20 @@ class SRModel(BaseModel):
     # 得到网络的输出结果。该函数会在 validation 中用到（实际可以简化掉）
     # ==================================================================
     def get_current_visuals(self):
-        # if type(self.output) is not torch.Tensor:
-        #     self.output = self.output[0]
+        print("\ngt: ({}, {})".format(self.gt.size(-2), self.gt.size(-1)))
+        print("lq: ({}, {})".format(self.lq.size(-2), self.lq.size(-1)))
+        print("output: ({}, {})".format(self.output.size(-2), self.output.size(-1)))
+
         if self.output.ndim == 4 and self.output.shape != self.gt.shape:
-            self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
+            self.output = T.Resize(size=(self.gt.size(-2), self.gt.size(-1)), interpolation=InterpolationMode.BICUBIC,
+                         antialias=True)(self.output)
+            # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
         if self.output.ndim == 5 and self.output.shape != self.gt.shape:
             b, t, c, h, w = self.output.size()
             self.output = self.output.view(-1, c, h, w)
-            self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
+            # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
+            self.output = T.Resize(size=(self.gt.size(-2), self.gt.size(-1)), interpolation=InterpolationMode.BICUBIC,
+                                   antialias=True)(self.output)
             self.output = self.output.view(b, t, c, self.output.size(-2), self.output.size(-1))
         out_dict = OrderedDict()
         out_dict['lq'] = self.lq.detach().cpu()

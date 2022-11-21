@@ -32,6 +32,9 @@ class STANModel(VideoBaseModel):
         l_total = 0
         loss_dict = OrderedDict()
 
+        if hasattr(self, 'scale'):
+            self.net_g.set_scale(self.scale)
+            print('current iteration scale: {}'.format(self.scale))
         output_last_fea = None
         # ================================================================
         for idx in range(7):
@@ -68,11 +71,17 @@ class STANModel(VideoBaseModel):
 
     def test(self):
         if hasattr(self, 'net_g_ema'):      # self.lq: torch.Size([1, 7, 3, 144, 180]);
+            self.net_g_ema.set_scale(self.opt['scale'])
             self.net_g_ema.eval()
             with torch.no_grad():
                 self.output, out_fea = self.net_g_ema(self.lq, self.output_last_fea)
                 self.output_last_fea = out_fea.detach()
         else:
+            if self.opt['is_train']:
+                if self.opt['datasets']['val'].__contains__('downsampling_scale'):
+                    self.net_g.set_scale(self.opt['datasets']['val']['downsampling_scale'])
+            else:
+                self.net_g.set_scale(self.opt['scale'])
             self.net_g.eval()
             with torch.no_grad():
                 self.output, out_fea = self.net_g(self.lq, self.output_last_fea)   # network influence
@@ -89,7 +98,7 @@ class STANModel(VideoBaseModel):
         #    'folder2': tensor (num_frame x len(metrics))
         # }
         if with_metrics:
-            if not hasattr(self, 'metric_results'):  # only execute in the first run
+            if not hasattr(self, 'metric_results') or self.metric_results:  # only execute in the first run X
                 self.metric_results = {}
                 num_frame_each_folder = Counter(dataset.data_info['folder'])
                 for folder, num_frame in num_frame_each_folder.items():
@@ -110,7 +119,9 @@ class STANModel(VideoBaseModel):
         for idx in range(rank, len(dataset), world_size):
             val_data = dataset[idx]     # dict{'lq': Tensor TCHW, 'gt': Tensor CHW, 'folder': 'calendar', 'idx': '0/41', border: 1, 'lq_path': str}
             val_data['lq'].unsqueeze_(0)
+            # print("\nlq:({}, {})".format(val_data['lq'].size(-2), val_data['lq'].size(-1)))
             val_data['gt'].unsqueeze_(0)
+            # print("gt:({}, {})".format(val_data['gt'].size(-2), val_data['gt'].size(-1)))
             folder = val_data['folder']
             frame_idx, max_idx = val_data['idx'].split('/')
             if frame_idx == '0':
