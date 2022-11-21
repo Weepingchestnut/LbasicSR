@@ -169,6 +169,10 @@ def train_pipeline(root_path):
     # 虽然以 epoch 为外层循环，但实际是以 iteration 来判断训练是否结束
     for epoch in range(start_epoch, total_epochs + 1):
         train_sampler.set_epoch(epoch)
+        # ==============================
+        if hasattr(train_loader.dataset, 'epoch'):
+            train_loader.dataset.set_epoch(epoch)
+        # ==============================
         prefetcher.reset()
         train_data = prefetcher.next()
 
