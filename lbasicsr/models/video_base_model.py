@@ -25,7 +25,7 @@ class VideoBaseModel(SRModel):
         #    'folder2': tensor (num_frame x len(metrics))
         # }
         if with_metrics:
-            if not hasattr(self, 'metric_results'):  # only execute in the first run
+            if not hasattr(self, 'metric_results') or self.metric_results:  # only execute in the first run X
                 self.metric_results = {}
                 num_frame_each_folder = Counter(dataset.data_info['folder'])
                 for folder, num_frame in num_frame_each_folder.items():
