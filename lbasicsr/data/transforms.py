@@ -47,17 +47,74 @@ def as_mod_crop(img, scale):
     :param scale: (float) scale factor.
     :return: (ndarray): Result image.
     """
-    step = cal_step(scale)
+    step_h = cal_step(scale[0])
+    step_w = cal_step(scale[1])
 
     img = img.copy()
     if img.ndim in (2, 3):
         h, w = img.shape[0], img.shape[1]
-        h = round(floor(h / step / scale) * step * scale)
-        w = round(floor(w / step / scale) * step * scale)
+        h = round(floor(h / step_h / scale[0]) * step_h * scale[0])
+        w = round(floor(w / step_w / scale[1]) * step_w * scale[1])
         img = img[:h, :w, ...]
     else:
         raise ValueError(f'Wrong img ndim: {img.ndim}.')
     return img
+
+
+def single_random_spcrop(img_gts, patch_size: tuple):
+    if not isinstance(img_gts, list):
+        img_gts = [img_gts]
+
+    # determine input type: Numpy array or Tensor
+    input_type = 'Tensor' if torch.is_tensor(img_gts[0]) else 'Numpy'
+
+    if input_type == 'Tensor':
+        h_gt, w_gt = img_gts[0].size()[-2:]
+    else:
+        h_gt, w_gt = img_gts[0].shape[0:2]
+
+    # randomly choose top and left coordinates for lq patch
+    top = random.randint(0, h_gt - patch_size[0])
+    left = random.randint(0, w_gt - patch_size[1])
+
+    # crop gt patch
+    if input_type == 'Tensor':
+        img_gts = [v[:, :, top:top + patch_size[0], left:left + patch_size[1]] for v in img_gts]
+    else:
+        img_gts = [v[top:top + patch_size[0], left:left + patch_size[1], ...] for v in img_gts]
+
+    if len(img_gts) == 1:
+        img_gts = img_gts[0]
+
+    return img_gts
+
+
+def single_random_crop(img_gts, gt_patch_size: tuple):
+    if not isinstance(img_gts, list):
+        img_gts = [img_gts]
+
+    # determine input type: Numpy array or Tensor
+    input_type = 'Tensor' if torch.is_tensor(img_gts[0]) else 'Numpy'
+
+    if input_type == 'Tensor':
+        h_gt, w_gt = img_gts[0].size()[-2:]
+    else:
+        h_gt, w_gt = img_gts[0].shape[0:2]
+
+    # randomly choose top and left coordinates for lq patch
+    top = random.randint(0, h_gt - gt_patch_size[0])
+    left = random.randint(0, w_gt - gt_patch_size[1])
+
+    # crop gt patch
+    if input_type == 'Tensor':
+        img_gts = [v[:, :, top:top + gt_patch_size[0], left:left + gt_patch_size[1]] for v in img_gts]
+    else:
+        img_gts = [v[top:top + gt_patch_size[0], left:left + gt_patch_size[1], ...] for v in img_gts]
+
+    if len(img_gts) == 1:
+        img_gts = img_gts[0]
+
+    return img_gts
 
 
 def paired_random_crop(img_gts, img_lqs, gt_patch_size, scale, gt_path=None):
@@ -156,9 +213,11 @@ def augment(imgs, hflip=True, rotation=True, flows=None, return_status=False):
 
     def _augment(img):
         if hflip:  # horizontal
-            cv2.flip(img, 1, img)
+            # cv2.flip(img, 1, img)
+            img = cv2.flip(img, 1)
         if vflip:  # vertical
-            cv2.flip(img, 0, img)
+            # cv2.flip(img, 0, img)
+            img = cv2.flip(img, 0)
         if rot90:
             img = img.transpose(1, 0, 2)
         return img

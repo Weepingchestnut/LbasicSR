@@ -67,11 +67,19 @@ def build_dataloader(dataset, dataset_opt, num_gpu=1, dist=False, sampler=None, 
             multiplier = 1 if num_gpu == 0 else num_gpu
             batch_size = dataset_opt['batch_size_per_gpu'] * multiplier
             num_workers = dataset_opt['num_worker_per_gpu'] * multiplier
+        # ====================================================================
+        # use custom collate_fn
+        if hasattr(dataset, 'as_collate_fn'):
+            collate_fn = dataset.as_collate_fn
+        else:
+            collate_fn = None
+        # ====================================================================
         dataloader_args = dict(
             dataset=dataset,
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
+            collate_fn=collate_fn,
             sampler=sampler,
             drop_last=True)
         if sampler is None:

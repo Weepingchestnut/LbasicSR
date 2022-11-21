@@ -268,6 +268,8 @@ class ASVideoTestDataset(data.Dataset):
     def __init__(self, opt):
         super(ASVideoTestDataset, self).__init__()
         self.opt = opt
+        if 'downsampling_scale' in self.opt.keys():
+            self.opt['scale'] = self.opt['downsampling_scale']
         self.cache_data = opt['cache_data']
         self.gt_root, self.lq_root = opt['dataroot_gt'], opt['dataroot_lq']
         self.data_info = {'lq_path': [], 'gt_path': [], 'folder': [], 'idx': [], 'border': []}
