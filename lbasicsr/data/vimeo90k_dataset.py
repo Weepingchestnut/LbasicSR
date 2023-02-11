@@ -26,7 +26,6 @@ class Vimeo90KDataset(data.Dataset):
     Examples:
 
     ::
-
         00001/0001 7 (256,448,3)
         00001/0002 7 (256,448,3)
 
@@ -133,6 +132,121 @@ class Vimeo90KDataset(data.Dataset):
 
     def __len__(self):
         return len(self.keys)
+
+
+@DATASET_REGISTRY.register()
+class ASVimeo90KDataset(Vimeo90KDataset):
+    def __init__(self, opt):
+        super(ASVimeo90KDataset, self).__init__(opt)
+
+        self.epoch = 0
+        self.init_int_scale = opt['init_int_scale']
+        self.single_scale_ft = opt['single_scale_ft']
+
+        self.scale_h_list = [
+            1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+            2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+            3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+            1.5, 1.5, 1.5, 1.5, 1.5,
+            2.0, 2.0, 2.0, 2.0, 2.0,
+            2.5, 2.5, 2.5, 2.5, 2.5,
+            3.0, 3.0, 3.0, 3.0, 3.0,
+            3.5, 3.5, 3.5, 3.5, 3.5,
+            4.0, 4.0, 4.0, 4.0, 4.0,
+        ]
+
+        self.scale_w_list = [
+            1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+            2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+            3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+            2.0, 2.5, 3.0, 3.5, 4.0,
+            1.5, 2.5, 3.0, 3.5, 4.0,
+            1.5, 2.0, 3.0, 3.5, 4.0,
+            1.5, 2.0, 2.5, 3.5, 4.0,
+            1.5, 2.0, 2.5, 3.0, 4.0,
+            1.5, 2.0, 2.5, 3.0, 3.5,
+        ]
+
+    def __getitem__(self, index):
+        if self.file_client is None:
+            self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
+
+        # random reverse
+        if self.random_reverse and random.random() < 0.5:
+            self.neighbor_list.reverse()
+
+        key = self.keys[index]
+        clip, seq = key.split('/')  # key example: 00001/0001
+
+        # get the neighboring GT frames
+        img_gts = []
+        for neighbor in self.neighbor_list:
+            if self.is_lmdb:
+                img_gt_path = f'{clip}/{seq}/im{neighbor}'
+            else:
+                img_gt_path = self.gt_root / clip / seq / f'im{neighbor}.png'
+
+            img_bytes = self.file_client.get(img_gt_path, 'gt')
+            img_gt = imfrombytes(img_bytes, float32=True)  # ndarry (256, 448, 3) [0, 1]
+
+            img_gts.append(img_gt)
+
+        # augmentation - flip, rotate
+        # img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
+
+        img_gts = img2tensor(img_gts)  # list
+        img_gts = torch.stack(img_gts, dim=0)
+
+        # img_lqs: (t, c, h, w)
+        # img_gt: (c, h, w)
+        # key: str
+        return {'gt': img_gts, 'key': key}
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
+    def as_collate_fn(self, batch):
+        out_batch = {}
+        elem = batch[0]
+        for key in elem.keys():
+            if key == 'gt':
+                gts_list = [d[key] for d in batch]
+                elem_cur = gts_list[0]
+                out = None
+                if torch.utils.data.get_worker_info() is not None:
+                    # If we're in a background process, concatenate directly into a
+                    # shared memory tensor to avoid an extra copy
+                    numel = sum([x.numel() for x in gts_list])
+                    storage = elem_cur.storage()._new_shared(numel)
+                    out = elem_cur.new(storage)
+                out_batch[key] = torch.stack(gts_list, 0, out=out)  # GT: B x T x C x H x W
+            elif key == 'key':
+                key_list = [d[key] for d in batch]
+                out_batch[key] = key_list
+
+        # get arbitrary scale ------------------------------------------------
+        if self.single_scale_ft:
+            scale_h = self.opt['scale'][0]
+            scale_w = self.opt['scale'][1]
+        elif self.epoch == 0 and self.init_int_scale:
+            scale_h = random.randint(2, 4)
+            scale_w = scale_h
+        else:
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+        lq_size = self.opt['lq_size']
+        gt_size = (round(lq_size * scale_h), round(lq_size * scale_w))
+
+        b, t, c, h, w = out_batch['gt'].size()
+        out_batch['gt'] = single_random_crop(out_batch['gt'].view(-1, c, h, w), gt_size)
+        out_batch['lq'] = arbitrary_scale_downsample(out_batch['gt'], (scale_h, scale_w), self.opt['downsample_mode'])
+        out_batch['gt'] = out_batch['gt'].view(b, t, c, gt_size[0], gt_size[1])
+        out_batch['gt'] = out_batch['gt'][:, t//2]
+        out_batch['lq'] = out_batch['lq'].view(b, t, c, lq_size, lq_size)
+        out_batch['scale'] = (scale_h, scale_w)
+
+        return out_batch
 
 
 @DATASET_REGISTRY.register()
@@ -274,7 +388,7 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
         # augmentation - flip, rotate
         # img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
 
-        img_gts = img2tensor(img_gts)       # list
+        img_gts = img2tensor(img_gts)  # list
         img_gts = torch.stack(img_gts, dim=0)
 
         if self.flip_sequence:  # flip the sequence: 7 frames to 14 frames
@@ -302,7 +416,7 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
                     numel = sum([x.numel() for x in gts_list])
                     storage = elem_cur.storage()._new_shared(numel)
                     out = elem_cur.new(storage)
-                out_batch[key] = torch.stack(gts_list, 0, out=out)      # GT: B x T x C x H x W
+                out_batch[key] = torch.stack(gts_list, 0, out=out)  # GT: B x T x C x H x W
             elif key == 'key':
                 key_list = [d[key] for d in batch]
                 out_batch[key] = key_list

@@ -382,11 +382,12 @@ def duf_downsample(x, kernel_size=13, scale=4):
 #     return x
 
 
-def arbitrary_scale_downsample(x: Tensor, scale: Union[tuple, float], mode='core'):
+def arbitrary_scale_downsample(x: Tensor, scale: Union[tuple, float], mode='torch'):
     """Downsamping with arbitrary scale (use bicubic).
 
     :param x: (Tensor) Frames to be downsampled, with shape (b, t, c, h, w).
     :param scale: (float) Downsampling factor. Supported arbitrary scale.
+    :param mode: bicubic implementation, core or torch
     :return:
         (Tensor) Arbitrary scale downsampled frames.
     """
