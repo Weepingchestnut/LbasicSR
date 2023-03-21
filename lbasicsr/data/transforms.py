@@ -1,3 +1,5 @@
+from typing import Union
+
 from math import floor
 
 import cv2
@@ -40,13 +42,16 @@ def cal_step(scale: float):
     return step
 
 
-def as_mod_crop(img, scale):
+def as_mod_crop(img, scale: Union[tuple, float]):
     """Mod crop images for arbitrary scale, used during testing.
 
     :param img: (ndarray) Input Image.
     :param scale: (float) scale factor.
     :return: (ndarray): Result image.
     """
+    if not isinstance(scale, tuple):
+        scale = (scale, scale)
+
     step_h = cal_step(scale[0])
     step_w = cal_step(scale[1])
 

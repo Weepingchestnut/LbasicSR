@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from lbasicsr.metrics.flops import get_flops
 from lbasicsr.utils.registry import ARCH_REGISTRY
 
 
@@ -162,3 +163,32 @@ class OVSR(nn.Module):
         pre_sr_all = torch.stack(pre_sr_all, 1)[:, start:end]
 
         return sr_all, pre_sr_all
+
+
+if __name__ == '__main__':
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # GOVSR-8+4-56 -------------------
+    # net = OVSR(
+    #     num_feat=56,
+    #     num_pb=8,
+    #     num_sb=4,
+    #     scale=4,
+    #     num_frame=5).to(device)
+    # GOVSR-8+4-80 -------------------
+    net = OVSR(
+        num_feat=80,
+        num_pb=8,
+        num_sb=4,
+        scale=4,
+        num_frame=5).to(device)
+    net.eval()
+
+    input = torch.rand(1, 5, 3, 64, 64).to(device)
+    get_flops(net, [5, 3, 180, 320])
+
+    with torch.no_grad():
+        out = net(input)
+
+    if isinstance(out, torch.Tensor):
+        print(out.shape)

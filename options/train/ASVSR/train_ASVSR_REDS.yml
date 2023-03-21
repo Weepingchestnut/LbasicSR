@@ -1,0 +1,154 @@
+# general settings
+name: 05_ASVSR_REDS_asBI
+model_type: ASVSRModel
+scale: !!python/tuple [4, 4]
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: REDS
+    type: ASREDSDataset
+    # disk: 3090 | CW | V100
+    dataroot_gt: datasets/REDS/train_sharp
+    dataroot_lq: datasets/REDS/train_sharp_bicubic/X4            # not needed
+#    # lmdb: 3090 | CW | V100
+#    dataroot_gt: datasets/REDS/train_sharp_with_val.lmdb
+#    dataroot_lq: datasets/REDS/train_sharp_bicubic_with_val.lmdb            # not needed
+    meta_info_file: lbasicsr/data/meta_info/meta_info_REDS_GT.txt
+    val_partition: REDS4  # set to 'official' when use the official validation partition
+    test_mode: False
+    io_backend:
+      type: disk    # [disk | lmdb]
+
+    num_frame: 7
+    # arbitrary scale dataset --------------------------
+    lq_size: 100
+    downsample_mode: torch    # [torch, core, numpy]
+    init_int_scale: true
+    single_scale_ft: false    # only a scale
+    # --------------------------------------------------
+    gt_size: 128    # not needed
+    interval_list: [1]
+    random_reverse: false
+    use_hflip: true
+    use_rot: true
+    flip_sequence: false
+
+    # data loader
+    num_worker_per_gpu: 6
+    batch_size_per_gpu: 8     # 16
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
+    # cpu --------------------
+#    prefetch_mode: cpu
+#    num_prefetch_queue: 1
+#    # cuda -------------------
+#    prefetch_mode: cuda
+#    pin_memory: true
+
+  val:
+    name: REDS4
+    type: ASVideoTestDataset
+    # 3090 | CW | V100
+    dataroot_gt: datasets/REDS/train_sharp
+    dataroot_lq: datasets/REDS/train_sharp_bicubic/X4
+    meta_info_file: lbasicsr/data/meta_info/meta_info_REDS4_test_GT.txt
+    # change to 'meta_info_REDSofficial4_test_GT' when use the official validation partition
+    io_backend:
+      type: disk
+
+    cache_data: false
+    num_frame: 7
+    padding: reflection_circle    # [reflection | reflection_circle]
+    # arbitrary scale dataset --------------------------
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [4, 4]
+    downsampling_mode: torch      # [torch | core | numpy]
+    # --------------------------------------------------
+
+# network structures
+network_g:
+  type: ASVSR
+  num_in_ch: 3
+  num_feat: 64
+  num_frame: 7
+  window_size: 5
+  n_resgroups: 5
+  n_resblocks: 10
+  center_frame_idx: ~
+
+# path
+path:
+  pretrain_network_g: experiments/05_ASVSR_REDS_asBI_02/models/net_g_125000.pth
+  strict_load_g: true
+  resume_state: ~
+
+# training settings
+train:
+#  ema_decay: 0.9
+  optim_g:
+    type: Adam
+    lr: !!float 1e-4
+    weight_decay: 0
+    betas: [ 0.9, 0.99 ]
+
+  scheduler:
+    # =============================================
+    type: CosineAnnealingRestartLR
+    periods: [ 50000, 100000, 150000, 150000, 150000 ]
+    restart_weights: [ 1, 0.5, 0.5, 0.5, 0.5 ]
+    eta_min: !!float 1e-7
+    # =============================================
+#    type: MultiStepLR
+#    milestones: [50000, 100000, 150000, 200000]
+#    milestones: [100000, 200000]
+#    gamma: 0.1
+#    restarts: [150000, 150000, 150000, 150000]
+#    restart_weights: [ 1, 0.1, 0.1, 0.1 ]
+#  ==============================================
+#    restart test
+#    restarts: [16, 32]
+#    restart_weights: [ 1, 0.1 ]
+#  ==============================================
+
+  total_iter: 600000    #600000
+  warmup_iter: -1  # no warm up
+
+  # losses
+  pixel_opt:
+    type: CharbonnierLoss
+    loss_weight: 1.0
+    reduction: mean     # [sum | mean]
+
+# validation settings
+val:
+  val_freq: !!float 1e4
+  save_img: false
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: !!float 1e4
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500
+
+#find_unused_parameters: true

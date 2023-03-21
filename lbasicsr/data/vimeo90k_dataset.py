@@ -5,7 +5,7 @@ import torch
 from torch.utils import data as data
 
 from lbasicsr.data.data_util import arbitrary_scale_downsample
-from lbasicsr.data.transforms import augment, paired_random_crop, single_random_crop, single_random_spcrop
+from lbasicsr.data.transforms import augment, paired_random_crop, single_random_crop, single_random_spcrop, mod_crop
 from lbasicsr.utils import FileClient, get_root_logger, imfrombytes, img2tensor
 from lbasicsr.utils.registry import DATASET_REGISTRY
 
@@ -102,6 +102,9 @@ class Vimeo90KDataset(data.Dataset):
             img_gt_path = self.gt_root / clip / seq / 'im4.png'
         img_bytes = self.file_client.get(img_gt_path, 'gt')
         img_gt = imfrombytes(img_bytes, float32=True)
+        # for x3 scale -------------------------------------------------------
+        if scale == 3:
+            img_gt = mod_crop(img_gt, scale)
 
         # get the neighboring LQ frames
         img_lqs = []
@@ -153,6 +156,7 @@ class ASVimeo90KDataset(Vimeo90KDataset):
             3.0, 3.0, 3.0, 3.0, 3.0,
             3.5, 3.5, 3.5, 3.5, 3.5,
             4.0, 4.0, 4.0, 4.0, 4.0,
+            # 6.0, 7.0, 7.5, 8.0
         ]
 
         self.scale_w_list = [
@@ -165,6 +169,7 @@ class ASVimeo90KDataset(Vimeo90KDataset):
             1.5, 2.0, 2.5, 3.5, 4.0,
             1.5, 2.0, 2.5, 3.0, 4.0,
             1.5, 2.0, 2.5, 3.0, 3.5,
+            # 6.0, 7.0, 7.5, 8.0
         ]
 
     def __getitem__(self, index):
@@ -379,11 +384,10 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
 
             img_gts.append(img_gt)
 
-        # =====================================================================
-        # 使得图像尺寸均为 256x448x3
+        # make the img size always 256x448x3 --------------------
         if img_gts[0].shape != (256, 448, 3):
             img_gts = single_random_spcrop(img_gts, (256, 448))
-        # =====================================================================
+        # -------------------------------------------------------
 
         # augmentation - flip, rotate
         # img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
@@ -421,8 +425,7 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
                 key_list = [d[key] for d in batch]
                 out_batch[key] = key_list
 
-        # ============================================================
-        # get arbitrary scale
+        # get arbitrary scale --------------------------------------------------
         if self.single_scale_ft:
             scale_h = self.opt['scale'][0]
             scale_w = self.opt['scale'][1]
@@ -436,7 +439,7 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
             # scale = random.randrange(11, self.opt['scale'] * 10 + 1) / 10
         lq_size = self.opt['lq_size']
         gt_size = (round(lq_size * scale_h), round(lq_size * scale_w))
-        # ============================================================
+        # ----------------------------------------------------------------------
         b, t, c, h, w = out_batch['gt'].size()
         out_batch['gt'] = single_random_crop(out_batch['gt'].view(-1, c, h, w), gt_size)
         out_batch['lq'] = arbitrary_scale_downsample(out_batch['gt'], (scale_h, scale_w), self.opt['downsample_mode'])
@@ -482,10 +485,13 @@ class Vimeo90KRecurrentDataset(Vimeo90KDataset):
                 img_gt_path = self.gt_root / clip / seq / f'im{neighbor}.png'
             # LQ
             img_bytes = self.file_client.get(img_lq_path, 'lq')
-            img_lq = imfrombytes(img_bytes, float32=True)  # ndarray (64, 112, 3)
+            img_lq = imfrombytes(img_bytes, float32=True)  # ndarray (85, 149, 3)
             # GT
             img_bytes = self.file_client.get(img_gt_path, 'gt')
             img_gt = imfrombytes(img_bytes, float32=True)  # (256, 448, 3)
+            # for x3 scale -------------------------------------------------------
+            if scale == 3:
+                img_gt = mod_crop(img_gt, scale)
 
             img_lqs.append(img_lq)
             img_gts.append(img_gt)

@@ -321,11 +321,14 @@ class SRModel(BaseModel):
         print("lq: ({}, {})".format(self.lq.size(-2), self.lq.size(-1)))
         print("output: ({}, {})".format(self.output.size(-2), self.output.size(-1)))
 
+        # arbitrary-scale BI post-processing
         if self.output.ndim == 4 and self.output.shape != self.gt.shape:
+            print('BI resize ......')
             self.output = T.Resize(size=(self.gt.size(-2), self.gt.size(-1)), interpolation=InterpolationMode.BICUBIC,
                          antialias=True)(self.output)
             # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
         if self.output.ndim == 5 and self.output.shape != self.gt.shape:
+            print('BI resize ......')
             b, t, c, h, w = self.output.size()
             self.output = self.output.view(-1, c, h, w)
             # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))

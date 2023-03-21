@@ -1,6 +1,6 @@
 # general settings
-name: DUF_baseline_Vimeo90K_BI
-model_type: VideoBaseModel
+name: STAN_baseline2_Vimeo90K_BIx4
+model_type: STANModel
 scale: 4
 num_gpu: 1  # set num_gpu: 0 for cpu mode
 manual_seed: 0
@@ -9,15 +9,16 @@ manual_seed: 0
 datasets:
   train:
     name: Vimeo90K
-    type: Vimeo90KDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/vimeo90k/vimoe_septuplet_origin/vimeo_septuplet/sequences
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/vimeo90k/vimeo_septuplet_matlabLRx4/sequences
-    meta_info_file: /data2/lzk_data/workspace/LbasicSR/lbasicsr/data/meta_info/meta_info_Vimeo90K_train_GT.txt
+    type: Vimeo90KRecurrentDataset
+    dataroot_gt: /data1/lzk_data/workspace/LbasicSR/datasets/vimeo90k/vimeo_septuplet/sequences
+    dataroot_lq: /data1/lzk_data/workspace/LbasicSR/datasets/vimeo90k/vimeo_septuplet_matlabLRx4/sequences
+    meta_info_file: /data1/lzk_data/workspace/LbasicSR/lbasicsr/data/meta_info/meta_info_Vimeo90K_train_GT.txt
     io_backend:
       type: disk
 
+#    use_all_gt: true
     num_frame: 7
-    gt_size: 128    # 32 x 4 = 128
+    gt_size: 128
     interval_list: [1]
     random_reverse: false
     use_hflip: true
@@ -26,17 +27,16 @@ datasets:
 
     # data loader
     num_worker_per_gpu: 6
-    batch_size_per_gpu: 16
-    dataset_enlarge_ratio: 200
-    prefetch_mode: cuda
-    pin_memory: True
-
+    batch_size_per_gpu: 6
+    dataset_enlarge_ratio: 1
+#    prefetch_mode: cuda
+#    pin_memory: true
 
   val:
     name: Vid4
     type: VideoTestDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
+    dataroot_gt: /data1/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
+    dataroot_lq: /data1/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
     io_backend:
       type: disk
 
@@ -46,16 +46,23 @@ datasets:
 
 # network structures
 network_g:
-  type: DUF
+  type: STAN
+  num_in_ch: 3
+  num_feat: 64
+  num_frame: 7
+  n_resgroups: 10
+  n_resblocks: 20
+  reduction: 16
+  center_frame_idx: ~
   scale: 4
-  num_layer: 52
-  adapt_official_weights: true
+  res_scale: 1
 
 # path
 path:
   pretrain_network_g: ~
   strict_load_g: true
-  resume_state: ~
+  resume_state: ~   # /data2/lzk_data/workspace/LbasicSR/experiments/STAN_Vimeo90K_BIx4/training_states/150000.state
+  new_train_setting: true
 
 # training settings
 train:
@@ -64,21 +71,15 @@ train:
     type: Adam
     lr: !!float 1e-4
     weight_decay: 0
-    betas: [0.9, 0.99]
+    betas: [ 0.9, 0.999 ]
 
   scheduler:
-    # ============================================
     type: CosineAnnealingRestartLR
-    periods: [ 50000, 50000, 50000, 50000 ]
+    periods: [ 150000, 150000, 150000, 150000 ]
     restart_weights: [ 1, 0.5, 0.5, 0.5 ]
     eta_min: !!float 1e-7
-    # ============================================
-#    type: MultiStepLR
-#    milestones: [ 50000, 100000, 150000, 200000 ]
-#    gamma: 0.1
-    # ============================================
 
-  total_iter: 200000
+  total_iter: 600000
   warmup_iter: -1  # no warm up
 
   # losses
@@ -89,7 +90,7 @@ train:
 
 # validation settings
 val:
-  val_freq: !!float 1e3
+  val_freq: !!float 5e3
   save_img: false
 
   metrics:
@@ -105,7 +106,7 @@ val:
 # logging settings
 logger:
   print_freq: 100
-  save_checkpoint_freq: !!float 1e3
+  save_checkpoint_freq: !!float 5e3
   use_tb_logger: true
   wandb:
     project: ~
@@ -115,5 +116,3 @@ logger:
 dist_params:
   backend: nccl
   port: 29500
-
-#find_unused_parameters: true

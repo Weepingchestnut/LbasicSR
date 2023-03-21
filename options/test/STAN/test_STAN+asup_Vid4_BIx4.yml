@@ -1,0 +1,85 @@
+# general settings
+#name: 02_STAN+tada+asup_Vid4_torch_BIx[3.5, 3.5]
+name: 02_STAN+tada+asup_Vimeo90K_BIx[4_1.2-3.8]
+model_type: STANModel
+scale: !!python/tuple [1.2, 3.8]
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+# dataset and data loader settings
+datasets:
+#  test_1:
+#    name: Vid4
+#    type: VideoTestDataset
+#    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
+#    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
+#    io_backend:
+#      type: disk
+#
+#    cache_data: false
+#    num_frame: 7
+#    padding: reflection
+  test_1:
+    name: Vid4
+    type: ASVideoTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
+    io_backend:
+      type: disk
+
+    cache_data: false
+    num_frame: 7
+    padding: reflection
+    # ==========================================
+    use_arbitrary_scale_downsampling: true
+#    downsampling_scale: !!python/tuple [ 4, 4 ]
+    downsampling_mode: torch
+    # ==========================================
+#  test_3:
+#    name: Vid4
+#    type: ASVideoTestDataset
+#    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT
+#    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Vid4/BIx4
+#    io_backend:
+#      type: disk
+#
+#    cache_data: false
+#    num_frame: 7
+#    padding: reflection
+#    use_arbitrary_scale_downsampling: true
+#    downsampling_mode: core
+
+# network structures
+network_g:
+  type: STAN
+  num_in_ch: 3
+  num_feat: 64
+  num_frame: 7
+  n_resgroups: 5
+  n_resblocks: 10
+  reduction: 16
+  center_frame_idx: ~
+#  scale: 4
+  res_scale: 1
+
+# path
+path:
+  pretrain_network_g: experiments/02_STAN+tada+asup_Vimeo90K_BIx[4_1.2-3.8]/models/net_g_99000.pth
+  strict_load_g: true
+  resume_state: ~
+#  param_key_g: params_ema
+
+# validation settings
+val:
+  save_img: false
+  suffix: ~  # add suffix to saved images, if None, use exp name
+
+  metrics:
+    psnr_y: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: true
+    ssim_y:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: true

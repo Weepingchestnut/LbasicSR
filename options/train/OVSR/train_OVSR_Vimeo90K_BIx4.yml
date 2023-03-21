@@ -60,7 +60,7 @@ network_g:
   num_pb: 8               # number of residual blocks in the precursor
   num_sb: 4               # number of residual blocks in the successor
   scale: 4                # sr scale
-  num_frame: 7            # we adopt one frame from the past, present, and future respectively
+  num_frame: 5            # we adopt one frame from the past, present, and future respectively
   kind: 'global'          # local or global
 
 # path

@@ -1,9 +1,13 @@
+import math
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
 
+from lbasicsr.metrics.flops import get_flops
 from lbasicsr.utils.registry import ARCH_REGISTRY
-from .arch_util import DCNv2Pack, ResidualBlockNoBN, make_layer
+from lbasicsr.archs.arch_util import DCNv2Pack, ResidualBlockNoBN, make_layer
 
 
 class PCDAlignment(nn.Module):
@@ -243,6 +247,23 @@ class PredeblurModule(nn.Module):
         return feat_l1
 
 
+class EDVRUpsample(nn.Sequential):
+    def __init__(self, scale, num_feat):
+        m = []
+        if (scale & (scale - 1)) == 0:
+            for _ in range(int(math.log(scale, 2))):
+                m.append(nn.Conv2d(num_feat, 4 * 64, 3, 1, 1, bias=True))
+                m.append(nn.PixelShuffle(2))
+                m.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+        elif scale == 3:
+            m.append(nn.Conv2d(num_feat, 9 * 64, 3, 1, 1, bias=True))
+            m.append(nn.PixelShuffle(3))
+            m.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+        else:
+            raise ValueError(f'scale {scale} is not supported. Supported scales: 2^n and 3.')
+        super(EDVRUpsample, self).__init__(*m)
+
+
 @ARCH_REGISTRY.register()
 class EDVR(nn.Module):
     """EDVR network structure for video super-resolution.
@@ -280,7 +301,8 @@ class EDVR(nn.Module):
                  center_frame_idx=None,
                  hr_in=False,
                  with_predeblur=False,
-                 with_tsa=True):
+                 with_tsa=True,
+                 scale=4):
         super(EDVR, self).__init__()
         if center_frame_idx is None:
             self.center_frame_idx = num_frame // 2
@@ -289,6 +311,7 @@ class EDVR(nn.Module):
         self.hr_in = hr_in
         self.with_predeblur = with_predeblur
         self.with_tsa = with_tsa
+        self.scale = scale
 
         # extract features for each frame
         if self.with_predeblur:
@@ -314,9 +337,12 @@ class EDVR(nn.Module):
         # reconstruction
         self.reconstruction = make_layer(ResidualBlockNoBN, num_reconstruct_block, num_feat=num_feat)
         # upsample
-        self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1)
-        self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1)
-        self.pixel_shuffle = nn.PixelShuffle(2)
+        # -----------------------------------------------------------------------
+        # self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1)
+        # self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1)
+        # self.pixel_shuffle = nn.PixelShuffle(2)
+        self.upsample = EDVRUpsample(scale, num_feat)
+        # -----------------------------------------------------------------------
         self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
         self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
 
@@ -325,12 +351,22 @@ class EDVR(nn.Module):
 
     def forward(self, x):
         b, t, c, h, w = x.size()
+        origin_h, origin_w = h, w
+
+        x_center = x[:, self.center_frame_idx, :, :, :].contiguous()
+
         if self.hr_in:
             assert h % 16 == 0 and w % 16 == 0, ('The height and width must be multiple of 16.')
         else:
-            assert h % 4 == 0 and w % 4 == 0, ('The height and width must be multiple of 4.')
-
-        x_center = x[:, self.center_frame_idx, :, :, :].contiguous()    # torch.Size([32, 3, 64, 64])
+            # assert h % 4 == 0 and w % 4 == 0, ('The height and width must be multiple of 4.')
+            if not (h % 4 == 0 and w % 4 == 0):
+                # print('\nThe height and width must be multiple of 4.')
+                x = x.view(-1, c, h, w)
+                h = int(h // 4) * 4
+                w = int(w // 4) * 4
+                x = T.Resize(size=(h, w), interpolation=InterpolationMode.BICUBIC)(x)
+                x = x.view(b, t, c, h, w)
+                # print('after resize: {}'.format(x.size()))
 
         # extract features for each frame
         # L1
@@ -349,13 +385,13 @@ class EDVR(nn.Module):
         feat_l3 = self.lrelu(self.conv_l3_1(feat_l2))
         feat_l3 = self.lrelu(self.conv_l3_2(feat_l3))
 
-        feat_l1 = feat_l1.view(b, t, -1, h, w)      # torch.Size([32, 5, 64, 64, 64])
-        feat_l2 = feat_l2.view(b, t, -1, h // 2, w // 2)    # torch.Size([32, 5, 64, 32, 32])
-        feat_l3 = feat_l3.view(b, t, -1, h // 4, w // 4)    # torch.Size([32, 5, 64, 16, 16])
+        feat_l1 = feat_l1.view(b, t, -1, h, w)
+        feat_l2 = feat_l2.view(b, t, -1, h // 2, w // 2)
+        feat_l3 = feat_l3.view(b, t, -1, h // 4, w // 4)
 
         # PCD alignment
         ref_feat_l = [  # reference feature list
-            feat_l1[:, self.center_frame_idx, :, :, :].clone(),     # torch.Size([32, 64, 64, 64])
+            feat_l1[:, self.center_frame_idx, :, :, :].clone(),
             feat_l2[:, self.center_frame_idx, :, :, :].clone(),
             feat_l3[:, self.center_frame_idx, :, :, :].clone()
         ]
@@ -365,20 +401,47 @@ class EDVR(nn.Module):
                 feat_l1[:, i, :, :, :].clone(), feat_l2[:, i, :, :, :].clone(), feat_l3[:, i, :, :, :].clone()
             ]
             aligned_feat.append(self.pcd_align(nbr_feat_l, ref_feat_l))
-        aligned_feat = torch.stack(aligned_feat, dim=1)  # (b, t, c, h, w) torch.Size([32, 5, 64, 64, 64])
+        aligned_feat = torch.stack(aligned_feat, dim=1)  # (b, t, c, h, w)
 
         if not self.with_tsa:
             aligned_feat = aligned_feat.view(b, -1, h, w)
         feat = self.fusion(aligned_feat)
 
+        # restore the original resolution
+        if (origin_h, origin_w) != (h, w):
+            feat = T.Resize(size=(origin_h, origin_w), interpolation=InterpolationMode.BICUBIC)(feat)
+
         out = self.reconstruction(feat)
-        out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))
-        out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))
+        # -----------------------------------------------------------------
+        # out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))
+        # out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))
+        out = self.upsample(out)
+        # -----------------------------------------------------------------
         out = self.lrelu(self.conv_hr(out))
         out = self.conv_last(out)
         if self.hr_in:
             base = x_center
         else:
-            base = F.interpolate(x_center, scale_factor=4, mode='bilinear', align_corners=False)
+            base = F.interpolate(x_center, scale_factor=self.scale, mode='bilinear', align_corners=False)
         out += base
         return out
+
+
+if __name__ == '__main__':
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # EDVR-M -----------------
+    # net = EDVR().to(device)
+    # EDVR-L -----------------
+    net = EDVR(num_feat=128, num_reconstruct_block=40).to(device)
+    net.eval()
+
+    # print(
+    #     "EDVR have {:.3f}M parameters in total".format(sum(x.numel() for x in net.parameters()) / 1000000.0))
+
+    input = torch.rand(1, 5, 3, 64, 64).to(device)
+    get_flops(net, [5, 3, 180, 320])
+
+    with torch.no_grad():
+        out = net(input)
+
+    print(out.shape)

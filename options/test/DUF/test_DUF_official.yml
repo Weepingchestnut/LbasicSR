@@ -8,8 +8,8 @@ datasets:
   test:
     name: Vid4
     type: VideoTestDUFDataset
-    dataroot_gt: /data/lzk/workspace/LbasicSR/datasets/Vid4/GT
-    dataroot_lq: /data/lzk/workspace/LbasicSR/datasets/Vid4/BIx4
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
     io_backend:
       type: disk
 
@@ -28,7 +28,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: /data/lzk/workspace/LbasicSR/experiments/pretrained_models/DUF/DUF_x4_52L_official-483d2c78.pth
+  pretrain_network_g: experiments/pretrained_models/DUF/DUF_x4_52L_official-483d2c78.pth
   strict_load_g: true
 
 # validation settings

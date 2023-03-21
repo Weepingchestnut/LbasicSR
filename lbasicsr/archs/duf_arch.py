@@ -28,36 +28,29 @@ class DenseBlocksTemporalReduce(nn.Module):
             momentum = 0.1
 
         self.temporal_reduce1 = nn.Sequential(
-            nn.BatchNorm3d(num_feat, eps=eps, momentum=momentum),
-            nn.ReLU(inplace=True),
+            nn.BatchNorm3d(num_feat, eps=eps, momentum=momentum), nn.ReLU(inplace=True),
             nn.Conv3d(num_feat, num_feat, (1, 1, 1), stride=(1, 1, 1), padding=(0, 0, 0), bias=True),
-            nn.BatchNorm3d(num_feat, eps=eps, momentum=momentum),
-            nn.ReLU(inplace=True),
+            nn.BatchNorm3d(num_feat, eps=eps, momentum=momentum), nn.ReLU(inplace=True),
             nn.Conv3d(num_feat, num_grow_ch, (3, 3, 3), stride=(1, 1, 1), padding=(0, 1, 1), bias=True))
 
         self.temporal_reduce2 = nn.Sequential(
-            nn.BatchNorm3d(num_feat + num_grow_ch, eps=eps, momentum=momentum),
-            nn.ReLU(inplace=True),
+            nn.BatchNorm3d(num_feat + num_grow_ch, eps=eps, momentum=momentum), nn.ReLU(inplace=True),
             nn.Conv3d(
                 num_feat + num_grow_ch,
                 num_feat + num_grow_ch, (1, 1, 1),
                 stride=(1, 1, 1),
                 padding=(0, 0, 0),
-                bias=True),
-            nn.BatchNorm3d(num_feat + num_grow_ch, eps=eps, momentum=momentum),
-            nn.ReLU(inplace=True),
+                bias=True), nn.BatchNorm3d(num_feat + num_grow_ch, eps=eps, momentum=momentum), nn.ReLU(inplace=True),
             nn.Conv3d(num_feat + num_grow_ch, num_grow_ch, (3, 3, 3), stride=(1, 1, 1), padding=(0, 1, 1), bias=True))
 
         self.temporal_reduce3 = nn.Sequential(
-            nn.BatchNorm3d(num_feat + 2 * num_grow_ch, eps=eps, momentum=momentum),
-            nn.ReLU(inplace=True),
+            nn.BatchNorm3d(num_feat + 2 * num_grow_ch, eps=eps, momentum=momentum), nn.ReLU(inplace=True),
             nn.Conv3d(
                 num_feat + 2 * num_grow_ch,
                 num_feat + 2 * num_grow_ch, (1, 1, 1),
                 stride=(1, 1, 1),
                 padding=(0, 0, 0),
-                bias=True),
-            nn.BatchNorm3d(num_feat + 2 * num_grow_ch, eps=eps, momentum=momentum),
+                bias=True), nn.BatchNorm3d(num_feat + 2 * num_grow_ch, eps=eps, momentum=momentum),
             nn.ReLU(inplace=True),
             nn.Conv3d(
                 num_feat + 2 * num_grow_ch, num_grow_ch, (3, 3, 3), stride=(1, 1, 1), padding=(0, 1, 1), bias=True))
@@ -70,14 +63,14 @@ class DenseBlocksTemporalReduce(nn.Module):
         Returns:
             Tensor: Output with shape (b, num_feat + num_grow_ch * 3, 1, h, w).
         """
-        x1 = self.temporal_reduce1(x)       # torch.Size([16, 400, 7, 32, 32]) => torch.Size([16, 400, 7, 32, 32])
-        x1 = torch.cat((x[:, :, 1:-1, :, :], x1), 1)    # torch.Size([16, 416, 5, 32, 32])
+        x1 = self.temporal_reduce1(x)
+        x1 = torch.cat((x[:, :, 1:-1, :, :], x1), 1)
 
-        x2 = self.temporal_reduce2(x1)      # torch.Size([16, 16, 3, 32, 32])
-        x2 = torch.cat((x1[:, :, 1:-1, :, :], x2), 1)   # torch.Size([16, 432, 3, 32, 32])
+        x2 = self.temporal_reduce2(x1)
+        x2 = torch.cat((x1[:, :, 1:-1, :, :], x2), 1)
 
-        x3 = self.temporal_reduce3(x2)      # torch.Size([16, 16, 1, 32, 32])
-        x3 = torch.cat((x2[:, :, 1:-1, :, :], x3), 1)   # torch.Size([16, 448, 1, 32, 32])
+        x3 = self.temporal_reduce3(x2)
+        x3 = torch.cat((x2[:, :, 1:-1, :, :], x3), 1)
 
         return x3
 
@@ -109,15 +102,13 @@ class DenseBlocks(nn.Module):
         for i in range(0, num_block):
             self.dense_blocks.append(
                 nn.Sequential(
-                    nn.BatchNorm3d(num_feat + i * num_grow_ch, eps=eps, momentum=momentum),
-                    nn.ReLU(inplace=True),
+                    nn.BatchNorm3d(num_feat + i * num_grow_ch, eps=eps, momentum=momentum), nn.ReLU(inplace=True),
                     nn.Conv3d(
                         num_feat + i * num_grow_ch,
                         num_feat + i * num_grow_ch, (1, 1, 1),
                         stride=(1, 1, 1),
                         padding=(0, 0, 0),
-                        bias=True),
-                    nn.BatchNorm3d(num_feat + i * num_grow_ch, eps=eps, momentum=momentum),
+                        bias=True), nn.BatchNorm3d(num_feat + i * num_grow_ch, eps=eps, momentum=momentum),
                     nn.ReLU(inplace=True),
                     nn.Conv3d(
                         num_feat + i * num_grow_ch,
@@ -143,7 +134,8 @@ class DenseBlocks(nn.Module):
 class DynamicUpsamplingFilter(nn.Module):
     """Dynamic upsampling filter used in DUF.
 
-    Ref: https://github.com/yhjo09/VSR-DUF.
+    Reference: https://github.com/yhjo09/VSR-DUF
+
     It only supports input with 3 channels. And it applies the same filters to 3 channels.
 
     Args:
@@ -167,12 +159,10 @@ class DynamicUpsamplingFilter(nn.Module):
 
         Args:
             x (Tensor): Input image with 3 channels. The shape is (n, 3, h, w).
-            filters (Tensor): Generated dynamic filters.
-                The shape is (n, filter_prod, upsampling_square, h, w).
+            filters (Tensor): Generated dynamic filters. The shape is (n, filter_prod, upsampling_square, h, w).
                 filter_prod: prod of filter kernel size, e.g., 1*5*5=25.
-                upsampling_square: similar to pixel shuffle,
-                    upsampling_square = upsampling * upsampling
-                    e.g., for x 4 upsampling, upsampling_square= 4*4 = 16
+                upsampling_square: similar to pixel shuffle, upsampling_square = upsampling * upsampling.
+                e.g., for x 4 upsampling, upsampling_square= 4*4 = 16
 
         Returns:
             Tensor: Filtered image with shape (n, 3*upsampling_square, h, w)
@@ -192,10 +182,10 @@ class DynamicUpsamplingFilter(nn.Module):
 class DUF(nn.Module):
     """Network architecture for DUF
 
-    Paper: Jo et al. Deep Video Super-Resolution Network Using Dynamic
-            Upsampling Filters Without Explicit Motion Compensation, CVPR, 2018
-    Code reference:
-        https://github.com/yhjo09/VSR-DUF
+    ``Paper: Deep Video Super-Resolution Network Using Dynamic Upsampling Filters Without Explicit Motion Compensation``
+
+    Reference: https://github.com/yhjo09/VSR-DUF
+
     For all the models below, 'adapt_official_weights' is only necessary when
     loading the weights converted from the official TensorFlow weights.
     Please set it to False if you are training the model from scratch.
@@ -265,22 +255,22 @@ class DUF(nn.Module):
         x = x.permute(0, 2, 1, 3, 4)  # (b, c, 7, h, w) for Conv3D
         x_center = x[:, :, num_imgs // 2, :, :]
 
-        x = self.conv3d1(x)                             # torch.Size([16, 64, 7, 32, 32])
+        x = self.conv3d1(x)
         x = self.dense_block1(x)
-        x = self.dense_block2(x)                        # torch.Size([16, 448, 1, 32, 32])
-        x = F.relu(self.bn3d2(x), inplace=True)         # torch.Size([16, 448, 1, 32, 32])  BN -> ReLU
-        x = F.relu(self.conv3d2(x), inplace=True)       # torch.Size([16, 256, 1, 32, 32])  3x3 Conv3d -> ReLU
+        x = self.dense_block2(x)
+        x = F.relu(self.bn3d2(x), inplace=True)
+        x = F.relu(self.conv3d2(x), inplace=True)
 
-        # residual image    1x1x1 Conv3d -> ReLU -> 1x1x1 Conv3d
-        res = self.conv3d_r2(F.relu(self.conv3d_r1(x), inplace=True))   # torch.Size([16, 48, 1, 32, 32])
+        # residual image
+        res = self.conv3d_r2(F.relu(self.conv3d_r1(x), inplace=True))
 
         # filter
-        filter_ = self.conv3d_f2(F.relu(self.conv3d_f1(x), inplace=True))                   # torch.Size([16, 400, 1, 32, 32])
-        filter_ = F.softmax(filter_.view(num_batches, 25, self.scale**2, h, w), dim=1)      # torch.Size([16, 25, 16, 32, 32])
+        filter_ = self.conv3d_f2(F.relu(self.conv3d_f1(x), inplace=True))
+        filter_ = F.softmax(filter_.view(num_batches, 25, self.scale**2, h, w), dim=1)
 
         # dynamic filter
-        out = self.dynamic_filter(x_center, filter_)    # torch.Size([16, 48, 32, 32])
+        out = self.dynamic_filter(x_center, filter_)
         out += res.squeeze_(2)
-        out = F.pixel_shuffle(out, self.scale)          # not learnable
+        out = F.pixel_shuffle(out, self.scale)
 
         return out

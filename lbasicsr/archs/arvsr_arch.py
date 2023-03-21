@@ -75,8 +75,7 @@ class SA_upsample(nn.Module):
 
         ## filters
         routing_weights = self.routing(embedding)
-        routing_weights = routing_weights.view(self.num_experts, round(scale * h) * round(scale2 * w)).transpose(0,
-                                                                                                                 1)  # (h*w) * n
+        routing_weights = routing_weights.view(self.num_experts, round(scale * h) * round(scale2 * w)).transpose(0, 1)  # (h*w) * n
 
         weight_compress = self.weight_compress.view(self.num_experts, -1)
         weight_compress = torch.matmul(routing_weights, weight_compress)
@@ -477,7 +476,7 @@ class ASVSR(nn.Module):
 
         # arbitrary scale upsampling -------------------------------------------
         sr = self.sa_upsample(h_feat, self.scale[0], self.scale[1])
-        sr = self.tail(sr)
+        sr = self.tail(sr)      # 3x3 Conv
         sr = sr + T.Resize(size=(round(h*self.scale[0]), round(w*self.scale[1])), interpolation=InterpolationMode.BICUBIC,
                            antialias=True)(x_center)
 

@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
@@ -6,6 +7,29 @@ from lbasicsr.utils.registry import ARCH_REGISTRY
 from .arch_util import ResidualBlockNoBN, flow_warp, make_layer
 from .edvr_arch import PCDAlignment, TSAFusion
 from .spynet_arch import SpyNet
+
+
+class BasicVSRUpsample(nn.Sequential):
+    """BasicVSR Upsample module.
+
+    Args:
+
+
+    """
+    def __init__(self, scale, num_feat):
+        m = []
+        if (scale & (scale - 1)) == 0:
+            for _ in range(int(math.log(scale, 2))):
+                m.append(nn.Conv2d(num_feat, 4 * num_feat, 3, 1, 1, bias=True))
+                m.append(nn.PixelShuffle(2))
+                m.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+        elif scale == 3:
+            m.append(nn.Conv2d(num_feat, 9 * num_feat, 3, 1, 1, bias=True))
+            m.append(nn.PixelShuffle(3))
+            m.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
+        else:
+            raise ValueError(f'scale {scale} is not supported. Supported scales: 2^n and 3.')
+        super(BasicVSRUpsample, self).__init__(*m)
 
 
 @ARCH_REGISTRY.register()
@@ -18,7 +42,7 @@ class BasicVSR(nn.Module):
         spynet_path (str): Path to the pretrained weights of SPyNet. Default: None.
     """
 
-    def __init__(self, num_feat=64, num_block=15, spynet_path=None):
+    def __init__(self, num_feat=64, num_block=15, spynet_path=None, scale=4):
         super().__init__()
         self.num_feat = num_feat
 
@@ -29,10 +53,16 @@ class BasicVSR(nn.Module):
         self.backward_trunk = ConvResidualBlocks(num_feat + 3, num_feat, num_block)
         self.forward_trunk = ConvResidualBlocks(num_feat + 3, num_feat, num_block)
 
+        self.scale = scale
+
         # reconstruction
         self.fusion = nn.Conv2d(num_feat * 2, num_feat, 1, 1, 0, bias=True)
-        self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1, bias=True)
-        self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1, bias=True)
+        # ---------------------------------------------------------------------
+        # self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1, bias=True)
+        # self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1, bias=True)
+        # ==>
+        self.upsample = BasicVSRUpsample(scale, num_feat)
+        # ---------------------------------------------------------------------
         self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
         self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
 
@@ -85,13 +115,17 @@ class BasicVSR(nn.Module):
             feat_prop = self.forward_trunk(feat_prop)
 
             # upsample
-            out = torch.cat([out_l[i], feat_prop], dim=1)
-            out = self.lrelu(self.fusion(out))
-            out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))
-            out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))
+            out = torch.cat([out_l[i], feat_prop], dim=1)               # torch.Size([4, 128, 64, 64])
+            out = self.lrelu(self.fusion(out))                          # torch.Size([4, 64, 64, 64])
+            # ------------------------------------------------------------------------------------------
+            # out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))     # torch.Size([4, 64, 128, 128])
+            # out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))     # torch.Size([4, 64, 256, 256])
+            # ==>
+            out = self.upsample(out)
+            # ------------------------------------------------------------------------------------------
             out = self.lrelu(self.conv_hr(out))
             out = self.conv_last(out)
-            base = F.interpolate(x_i, scale_factor=4, mode='bilinear', align_corners=False)
+            base = F.interpolate(x_i, scale_factor=self.scale, mode='bilinear', align_corners=False)
             out += base
             out_l[i] = out
 

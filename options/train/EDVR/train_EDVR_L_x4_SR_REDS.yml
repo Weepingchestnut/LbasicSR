@@ -10,10 +10,10 @@ datasets:
   train:
     name: REDS
     type: REDSDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/REDS/train_sharp
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/REDS/train_sharp_bicubic/X4
+    dataroot_gt: datasets/REDS/train_sharp
+    dataroot_lq: datasets/REDS/train_sharp_bicubic/X4
     dataroot_flow: ~
-    meta_info_file: /data2/lzk_data/workspace/LbasicSR/lbasicsr/data/meta_info/meta_info_REDS_GT.txt
+    meta_info_file: lbasicsr/data/meta_info/meta_info_REDS_GT.txt
     val_partition: REDS4  # set to 'official' when use the official validation partition
     io_backend:
       type: disk
@@ -34,9 +34,9 @@ datasets:
   val:
     name: REDS4
     type: VideoTestDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/REDS/train_sharp
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/REDS/train_sharp_bicubic/X4
-    meta_info_file: /data2/lzk_data/workspace/LbasicSR/lbasicsr/data/meta_info/meta_info_REDS4_test_GT.txt
+    dataroot_gt: datasets/REDS/train_sharp
+    dataroot_lq: datasets/REDS/train_sharp_bicubic/X4
+    meta_info_file: lbasicsr/data/meta_info/meta_info_REDS4_test_GT.txt
     # change to 'meta_info_REDSofficial4_test_GT' when use the official validation partition
     io_backend:
       type: disk
