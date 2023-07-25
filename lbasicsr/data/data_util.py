@@ -1,3 +1,4 @@
+import argparse
 import glob
 import os
 
@@ -291,12 +292,14 @@ def generate_gaussian_kernel(kernel_size=13, sigma=1.6):
     Returns:
         np.array: The Gaussian kernel.
     """
-    from scipy.ndimage import filters as filters
+    # from scipy.ndimage import filters as filters
+    from scipy.ndimage import gaussian_filter
     kernel = np.zeros((kernel_size, kernel_size))
     # set element at the middle to one, a dirac delta
     kernel[kernel_size // 2, kernel_size // 2] = 1
     # gaussian-smooth the dirac, resulting in a gaussian filter
-    return filters.gaussian_filter(kernel, sigma)
+    # return filters.gaussian_filter(kernel, sigma)
+    return gaussian_filter(kernel, sigma)
 
 
 def duf_downsample(x, kernel_size=13, scale=4):
@@ -332,57 +335,7 @@ def duf_downsample(x, kernel_size=13, scale=4):
     return x
 
 
-# def cal_step(scale: float):
-#     if abs(scale - round(scale)) < 0.001:
-#         step = 1
-#     elif abs(scale * 2 - round(scale * 2)) < 0.001:
-#         step = 2
-#     elif abs(scale * 5 - round(scale * 5)) < 0.001:
-#         step = 5
-#     elif abs(scale * 10 - round(scale * 10)) < 0.001:
-#         step = 10
-#     elif abs(scale * 20 - round(scale * 20)) < 0.001:
-#         step = 20
-#
-#     return step
-
-
-# def img_crop_bd(x, scale_h, scale_w):
-#     step_h = cal_step(scale_h)
-#     step_w = cal_step(scale_w)
-#
-#     # crop borders
-#     H, W = x.size(-2), x.size(-1)
-#     H = round(floor(H / step_h / scale_h) * step_h * scale_h)
-#     W = round(floor(W / step_w / scale_w) * step_w * scale_w)
-#     # print("after crop borders, H = {}, W = {}".format(H, W))
-#     x = x[..., :H, :W]
-#
-#     return x
-
-
-# def arbitrary_scale_downsample(x: Tensor, scale: float = 4.0):
-#     """Downsamping with arbitrary scale (use bicubic).
-#
-#     Args:
-#         x (Tensor): Frames to be downsampled, with shape (b, t, c, h, w).
-#         scale (int): Downsampling factor. Supported arbitrary scale.
-#             Default: 4.0.
-#     """
-#     squeeze_flag = False
-#     if x.ndim == 4:
-#         squeeze_flag = True
-#         x = x.unsqueeze(0)
-#     b, t, c, h, w = x.size()
-#     x = x.view(-1, h, w)
-#     x = imresize(x, 1/scale)
-#
-#     x = x.view(b, t, c, x.size(1), x.size(2))
-#
-#     return x
-
-
-def arbitrary_scale_downsample(x: Tensor, scale: Union[tuple, float], mode='torch'):
+def arbitrary_scale_downsample(x: Tensor, scale: Union[tuple, float], mode='torch', degradation='BI'):
     """Downsamping with arbitrary scale (use bicubic).
 
     :param x: (Tensor) Frames to be downsampled, with shape (b, t, c, h, w).
@@ -415,14 +368,17 @@ def arbitrary_scale_downsample(x: Tensor, scale: Union[tuple, float], mode='torc
     # w = round(floor(w / step_w / scale_w) * step_w * scale_w)
     # x = x[..., :h, :w]
 
-    x = x.view(-1, c, h, w)
     # bicubic downsampling
-    if mode == 'torch':
-        x = T.Resize(size=(round(h / scale_h), round(w / scale_w)), interpolation=InterpolationMode.BICUBIC,
-                     antialias=True)(x)
-    elif mode == 'core':
-        x = imresize(x, sizes=(round(h / scale_h), round(w / scale_w)))
-    x = x.view(b, t, c, x.size(-2), x.size(-1))
+    if degradation == 'BI':
+        x = x.view(-1, c, h, w)
+        if mode == 'torch':
+            x = T.Resize(size=(round(h / scale_h), round(w / scale_w)), interpolation=InterpolationMode.BICUBIC,
+                         antialias=True)(x)
+        elif mode == 'core':
+            x = imresize(x, sizes=(round(h / scale_h), round(w / scale_w)))
+        x = x.view(b, t, c, x.size(-2), x.size(-1))
+    elif degradation == 'BD':
+        x = duf_downsample(x, kernel_size=13, scale=scale_h)
 
     if squeeze_flag:
         x = x.squeeze(0)
@@ -431,86 +387,123 @@ def arbitrary_scale_downsample(x: Tensor, scale: Union[tuple, float], mode='torc
 
 
 def downsample_img():
-    # init
-    gt_path = '/data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT'
-    save_path = '/data2/lzk_data/workspace/LbasicSR/datasets/Vid4/arbitrary_scale_BI'
+    # ------ init -------------------------------------------------------------------------------------------
+    is_bi_sr = True    # if generate bicubic sr results at the same time
+
+    gt_path = '/data/lzk/workspace/LbasicSR/datasets/DIV2K/DIV2K_valid_HR'
+    save_path_ = '/data/lzk/workspace/LbasicSR/datasets/DIV2K/DIV2K_valid_arbitrary_scale_BI'
     imgs_name_gt = sorted(glob.glob(osp.join(gt_path, '*')))
-    scale = (1.5, 1.5)
 
-    for img_name_gt in imgs_name_gt:
-        img_name = osp.basename(img_name_gt)
-        print(img_name)
-        img_gt = cv2.imread(img_name_gt).astype(np.float32) / 255.
-        print("origin: {}".format(img_gt.shape))
-        img_gt = as_mod_crop(img_gt, scale)
-        img_gt = img2tensor(img_gt, bgr2rgb=True, float32=True)
-        # save crop gt -----------------------------------------------------------------------
-        save_crop_gt_path = osp.join(save_path, f'x{scale[0]}_x{scale[1]}_crop_gt', img_name)
-        result_img_crop_gt = tensor2img(img_gt)
-        imwrite(result_img_crop_gt, save_crop_gt_path)
-        # ------------------------------------------------------------------------------------
+    # scales = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2,
+    #           2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
+    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
 
-        img_gt = img_gt.unsqueeze(0)
-        print("crop: {}".format(img_gt.size()))
-        b, c, h, w = img_gt.size()
+    # scales = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9]
+    # scales = [2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9,
+    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9]
+    scales = [6, 12, 18, 24, 30]
+    # -------------------------------------------------------------------------------------------------------
 
-        img_lr = arbitrary_scale_downsample(img_gt, scale, mode='torch')
-        print("downsample: {}".format(img_lr.size()))
+    for cur_scale in scales:
+        print("\ncurrent scale: {}".format(cur_scale))
+        if isinstance(cur_scale, tuple):
+            scale = cur_scale
+            save_path = osp.join(save_path_, "x{}_x{}".format(scale[0], scale[1]))
+        else:
+            scale = (cur_scale, cur_scale)
+            save_path = osp.join(save_path_, "x{}".format(scale[0]))
 
-        # get bicubic ------------------------------------------------------------------------
-        img_sr = T.Resize(size=(h, w), interpolation=InterpolationMode.BICUBIC,
-                          antialias=True)(img_lr)
-        print("bicubic: {}".format(img_sr.size()))
-        # ------------------------------------------------------------------------------------
+        for img_name_gt in imgs_name_gt:
+            img_name = osp.basename(img_name_gt)
+            print(img_name)
+            img_gt = cv2.imread(img_name_gt).astype(np.float32) / 255.
 
-        save_img_path = osp.join(save_path, f'x{scale[0]}_x{scale[1]}', img_name)
-        result_img_lr = tensor2img(img_lr)
-        imwrite(result_img_lr, save_img_path)
+            print("origin GT shape: {}".format(img_gt.shape))
+            orig_H, orig_W = img_gt.shape[0], img_gt.shape[1]
+            img_gt = as_mod_crop(img_gt, scale)
+            img_gt = img2tensor(img_gt, bgr2rgb=True, float32=True)
 
-        save_bi_img_path = osp.join(save_path, f'x{scale[0]}_x{scale[1]}_bi', img_name)
-        result_bi_img_lr = tensor2img(img_sr)
-        imwrite(result_bi_img_lr, save_bi_img_path)
+            # # save crop gt -----------------------------------------------------------------------
+            # save_crop_gt_path = osp.join(save_path, f'x{scale[0]}_x{scale[1]}_crop_gt', img_name)
+            # result_img_crop_gt = tensor2img(img_gt)
+            # imwrite(result_img_crop_gt, save_crop_gt_path)
 
-        print('-'*100)
+            img_gt = img_gt.unsqueeze(0)
+            if orig_H != img_gt.shape[-2] or orig_W != img_gt.shape[-1]:
+                print("after as_mod_crop, GT shape: {}".format(img_gt.shape))
 
+            b, c, h, w = img_gt.size()
+            img_lr = arbitrary_scale_downsample(img_gt, scale, mode='torch')
+            print("after downsample, LR shape: {}".format(img_lr.shape))
 
-def downsample_visual():
-    # init
-    # gt_root = '/data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT'
-    gt_root = '/data2/lzk_data/workspace/LbasicSR/datasets/UDM10/GT'
-    save_path = '/data2/lzk_data/workspace/LbasicSR/datasets/UDM10/arbitrary_scale_BI'
-    subfolers_gt = sorted(glob.glob(osp.join(gt_root, '*')))
-    scale = (4, 4)
+            # ------ get bicubic -----------------------------------------------------------------
+            if is_bi_sr:
+                img_sr = T.Resize(size=(h, w), interpolation=InterpolationMode.BICUBIC,
+                                  antialias=True)(img_lr)
+                print("bicubic SR shape: {}".format(img_sr.shape))
 
-    for subfoler_gt in subfolers_gt:
-        subfoler_name = osp.basename(subfoler_gt)
-        print(subfoler_name)
-        img_paths_gt = sorted(list(scandir(subfoler_gt, full_path=True)))
+                save_bi_img_path = osp.join(save_path + "_bicubic_sr", img_name)
+                result_bi_img_lr = tensor2img(img_sr)
+                print(save_bi_img_path)
+                imwrite(result_bi_img_lr, save_bi_img_path)
+            # ------------------------------------------------------------------------------------
 
-        max_id = len(img_paths_gt)
-        print(max_id)
-        # print(img_paths_gt)
-        imgs_gt = read_img_seq(img_paths_gt, require_as_mod_crop=True, scale=scale)  # Tensor [41, 3, 576, 720], [0, 1] range
-        print(imgs_gt.size())
-        imgs_gt = imgs_gt.unsqueeze(0)
-        print(imgs_gt.size())
-
-        imgs_lr = arbitrary_scale_downsample(imgs_gt, scale, mode='torch')
-        print(imgs_lr.size())
-
-        i = 0
-        for img_path_gt in img_paths_gt:
-            img_name = osp.splitext(osp.basename(img_path_gt))[0]
-            if scale[0] == scale[1]:
-                save_img_path = osp.join(save_path, f'x{scale[0]}', subfoler_name, f'{img_name}.png')
-            else:
-                save_img_path = osp.join(save_path, f'x{scale[0]}_x{scale[1]}', subfoler_name, f'{img_name}.png')
-            img_lr = imgs_lr[:, i, ...]  # 按帧取
+            save_img_path = osp.join(save_path, img_name)
             result_img_lr = tensor2img(img_lr)
-            print('{}/{}: {}'.format(i + 1, len(img_paths_gt), save_img_path))
+            print(save_img_path)
             imwrite(result_img_lr, save_img_path)
-            i = i + 1
-        print('=' * 100)
+
+            print('-' * 100)
+
+
+def downsample_visual(degradation='BI'):
+    # init
+    gt_root = '/data/lzk/workspace/LbasicSR/datasets/UDM10/GT'
+    if degradation == 'BI':
+        save_path = '/data/lzk/workspace/LbasicSR/datasets/UDM10/arbitrary_scale_BI'
+    else:
+        save_path = '/data/lzk/workspace/LbasicSR/datasets/UDM10/arbitrary_scale_BD'
+    subfolers_gt = sorted(glob.glob(osp.join(gt_root, '*')))
+
+    # scales = [(3.25, 3.25)]
+    # scales = [(1.1, 1.1), (1.2, 1.2), (1.3, 1.3), (1.4, 1.4), (1.5, 1.5), (1.6, 1.6), (1.7, 1.7), (1.8, 1.8), (1.9, 1.9), (2, 2),
+    #           (2.1, 2.1), (2.2, 2.2), (2.3, 2.3), (2.4, 2.4), (2.5, 2.5), (2.6, 2.6), (2.7, 2.7), (2.8, 2.8), (2.9, 2.9), (3, 3),
+    #           (3.1, 3.1), (3.2, 3.2), (3.3, 3.3), (3.4, 3.4), (3.5, 3.5), (3.6, 3.6), (3.7, 3.7), (3.8, 3.8), (3.9, 3.9),
+    #           (1.5, 4), (2, 4), (1.5, 3.5), (1.6, 3.05), (3.5, 2), (3.5, 1.75), (4, 1.4)]
+    
+    # scales = [(2, 3.75), (1.7, 3.75), (2.95, 3.75), (3.9, 2), (3.5, 1.5)]
+    scales = [(4, 4)]
+
+    for scale in scales:
+        for subfoler_gt in subfolers_gt:
+            subfoler_name = osp.basename(subfoler_gt)
+            print(subfoler_name)
+            img_paths_gt = sorted(list(scandir(subfoler_gt, full_path=True)))
+
+            max_id = len(img_paths_gt)
+            print(max_id)
+            # print(img_paths_gt)
+            imgs_gt = read_img_seq(img_paths_gt, require_as_mod_crop=True, scale=scale)  # Tensor [41, 3, 576, 720], [0, 1] range
+            print(imgs_gt.size())
+            imgs_gt = imgs_gt.unsqueeze(0)
+            print(imgs_gt.size())
+
+            imgs_lr = arbitrary_scale_downsample(imgs_gt, scale, mode='torch', degradation=degradation)
+            print(imgs_lr.size())
+
+            i = 0
+            for img_path_gt in img_paths_gt:
+                img_name = osp.splitext(osp.basename(img_path_gt))[0]
+                if scale[0] == scale[1]:
+                    save_img_path = osp.join(save_path, f'x{scale[0]}', subfoler_name, f'{img_name}.png')
+                else:
+                    save_img_path = osp.join(save_path, f'x{scale[0]}_x{scale[1]}', subfoler_name, f'{img_name}.png')
+                img_lr = imgs_lr[:, i, ...]  # 按帧取
+                result_img_lr = tensor2img(img_lr)
+                print('{}/{}: {}'.format(i + 1, len(img_paths_gt), save_img_path))
+                imwrite(result_img_lr, save_img_path)
+                i = i + 1
+            print('=' * 100)
 
 
 def quick_test():
@@ -524,154 +517,310 @@ def quick_test():
 
     # save the results of resize asymmetric sr
     save_resize_img = False
-    videoinr = True
+    videoinr = False
 
     # set sr and gt root path ---------------------------------------------------------------------------
-    sr_root = '/data2/lzk_data/workspace/LbasicSR/results/VideoINR/Vid4'
-    gt_root = '/data2/lzk_data/workspace/LbasicSR/datasets/Vid4/GT'
-    # sr_root = '/data1/lzk_data/workspace/LbasicSR/results/rdn_pretrainedx3/medicine'
-    # gt_root = '/data1/lzk_data/workspace/LbasicSR/datasets/real_world_test/GT'
+    sr_root_ = '/data/lzk/workspace/LbasicSR/results/ArbSR/Vid4/asy'
+    gt_root = '/data/lzk/workspace/LbasicSR/datasets/Vid4/GT'
     # ---------------------------------------------------------------------------------------------------
 
     # set scale ------------
-    scale = 3.3
-    # scale = (2, 2)
+    # scales = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2,
+    #           2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
+    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
+    # scales = [(1.5, 4), (2, 4), (1.5, 3.5), (1.6, 3.05), (3.5, 2), (3.5, 1.75), (4, 1.4)]
+    # scales = [2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
+    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
+    # scales = [(3.5, 2), (3.5, 1.75), (4, 1.4)]
+    # scales = [(2, 3.75), (1.7, 3.75), (2.95, 3.75), (3.9, 2), (3.5, 1.5)]
+    scales = [ (3.5, 2), (3.5, 1.75), (4, 1.4)]
     # ----------------------
 
-    if isinstance(scale, tuple):
-        scale = scale
-        sr_root = osp.join(sr_root, 'x{}_x{}'.format(scale[0], scale[1]))
-        save_resize_img = True
-    else:
-        scale = (scale, scale)
-        sr_root = osp.join(sr_root, 'x{}'.format(scale[0]))
-    print('sr_root:', sr_root)
-    print('gt_root:', gt_root)
-
-    subfolers_gt = sorted(glob.glob(osp.join(gt_root, '*')))
-    # subfolers_sr = sorted(glob.glob(osp.join(sr_root, '*')))
-
-    psnr_all = []
-    ssim_all = []
-
-    for subfoler_gt in subfolers_gt:
-        subfoler_name = osp.basename(subfoler_gt)
-        print(subfoler_name)
-        subfoler_sr = osp.join(sr_root, subfoler_name)
-
-        img_paths_gt = sorted(list(scandir(subfoler_gt, full_path=True)))
-        img_paths_sr = sorted(list(scandir(subfoler_sr, full_path=True)))
-
-        max_id = len(img_paths_gt)
-        print(max_id)
-
-        # imgs_gt = read_img_seq(img_paths_gt, require_as_mod_crop=True, scale=scale)
-        # imgs_sr = read_img_seq(img_paths_sr, require_as_mod_crop=True, scale=scale)
-
-        # -------- origin ------------------------------------------
-        # imgs_gt = [cv2.imread(v) for v in img_paths_gt]
-        # print("gt size: {}".format(imgs_gt[0].shape))
-        # imgs_sr = [cv2.imread(v) for v in img_paths_sr]
-        # print("sr size: {}".format(imgs_sr[0].shape))
-
-        # -------- videoinr ------------------------------------------------------
-        # imgs_gt = [cv2.imread(v).astype(np.float32) / 255. for v in img_paths_gt]
-        # print("gt size: {}".format(imgs_gt[0].shape))
-        # imgs_sr = [cv2.imread(v).astype(np.float32) / 255. for v in img_paths_sr]
-        # print("sr size: {}".format(imgs_sr[0].shape))
-
-        imgs_gt = [cv2.imread(v, cv2.IMREAD_UNCHANGED) for v in img_paths_gt]
-        print("gt size: {}".format(imgs_gt[0].shape))
-        imgs_sr = [cv2.imread(v, cv2.IMREAD_UNCHANGED) for v in img_paths_sr]
-        print("sr size: {}".format(imgs_sr[0].shape))
-
-        # only for VideoINR sr city
-        # if imgs_sr[0].shape[1] != imgs_gt[0].shape[1]:  # W !=
-        #     print("VideoINR crop to adjust W ......")
-        #     imgs_sr = [img[:, 0:imgs_gt[0].shape[1], :] for img in imgs_sr]
-        # if imgs_sr[0].shape[0] != imgs_gt[0].shape[0]:    # H !=
-        #     print("VideoINR crop to adjust H ......")
-        #     imgs_sr = [img[0:imgs_gt[0].shape[0], ...] for img in imgs_sr]
-        if videoinr:
-            print("gt crop ......")
-            imgs_gt = [as_mod_crop(img, scale) for img in imgs_gt]
-            print("gt size: {}".format(imgs_gt[0].shape))
-            if imgs_sr[0].shape != imgs_gt[0].shape:
-                print('VideoINR need to BI adjust')
-                # # torch BI -----------------------------------------------------------------------------------------
-                # imgs_sr = img2tensor(imgs_sr)
-                # imgs_sr = [T.Resize(size=(imgs_gt[0].shape[0], imgs_gt[0].shape[1]),
-                #                    interpolation=InterpolationMode.BICUBIC, antialias=True)(img) for img in imgs_sr]
-                # imgs_sr = [tensor2img(img) for img in imgs_sr]
-
-                # -------- cv2 BI -------------------------------------------------------------------------------------
-                imgs_sr = [cv2.resize(img, (imgs_gt[0].shape[1], imgs_gt[0].shape[0]), interpolation=cv2.INTER_AREA)
-                           for img in imgs_sr]
-
-                # imgs_sr = [(img * 255.0).round().astype(np.uint8) for img in imgs_sr]
-
-
-
-        # as_mod_crop ---------------------------------------------------------------------------
-        if save_resize_img:
-            print('resize asymmetric sr, only crop GT')
-            print("after crop ......")
-            imgs_gt = [as_mod_crop(img, scale) for img in imgs_gt]
-            print("gt size: {}".format(imgs_gt[0].shape))
+    for scale in scales:
+        if isinstance(scale, tuple):
+            scale = scale
+            sr_root = osp.join(sr_root_, 'x{}_x{}'.format(scale[0], scale[1]))
+            save_resize_img = True
         else:
-            if imgs_gt[0].shape == imgs_sr[0].shape:
-                print("no crop ......")
-            else:
+            scale = (scale, scale)
+            sr_root = osp.join(sr_root_, 'x{}'.format(scale[0]))
+        print('sr_root:', sr_root)
+        print('gt_root:', gt_root)
+
+        subfolers_gt = sorted(glob.glob(osp.join(gt_root, '*')))
+        # subfolers_sr = sorted(glob.glob(osp.join(sr_root, '*')))
+
+        psnr_all = []
+        ssim_all = []
+
+        for subfoler_gt in subfolers_gt:
+            subfoler_name = osp.basename(subfoler_gt)
+            print(subfoler_name)
+            subfoler_sr = osp.join(sr_root, subfoler_name)
+
+            img_paths_gt = sorted(list(scandir(subfoler_gt, full_path=True)))
+            img_paths_sr = sorted(list(scandir(subfoler_sr, full_path=True)))
+
+            max_id = len(img_paths_gt)
+            print(max_id)
+
+            # imgs_gt = read_img_seq(img_paths_gt, require_as_mod_crop=True, scale=scale)
+            # imgs_sr = read_img_seq(img_paths_sr, require_as_mod_crop=True, scale=scale)
+
+            # -------- origin ------------------------------------------
+            # imgs_gt = [cv2.imread(v) for v in img_paths_gt]
+            # print("gt size: {}".format(imgs_gt[0].shape))
+            # imgs_sr = [cv2.imread(v) for v in img_paths_sr]
+            # print("sr size: {}".format(imgs_sr[0].shape))
+
+            # -------- videoinr ------------------------------------------------------
+            # imgs_gt = [cv2.imread(v).astype(np.float32) / 255. for v in img_paths_gt]
+            # print("gt size: {}".format(imgs_gt[0].shape))
+            # imgs_sr = [cv2.imread(v).astype(np.float32) / 255. for v in img_paths_sr]
+            # print("sr size: {}".format(imgs_sr[0].shape))
+
+            imgs_gt = [cv2.imread(v, cv2.IMREAD_UNCHANGED) for v in img_paths_gt]
+            print("gt size: {}".format(imgs_gt[0].shape))
+            imgs_sr = [cv2.imread(v, cv2.IMREAD_UNCHANGED) for v in img_paths_sr]
+            print("sr size: {}".format(imgs_sr[0].shape))
+
+            # only for VideoINR sr city
+            # if imgs_sr[0].shape[1] != imgs_gt[0].shape[1]:  # W !=
+            #     print("VideoINR crop to adjust W ......")
+            #     imgs_sr = [img[:, 0:imgs_gt[0].shape[1], :] for img in imgs_sr]
+            # if imgs_sr[0].shape[0] != imgs_gt[0].shape[0]:    # H !=
+            #     print("VideoINR crop to adjust H ......")
+            #     imgs_sr = [img[0:imgs_gt[0].shape[0], ...] for img in imgs_sr]
+            if videoinr:
+                print("gt crop ......")
+                imgs_gt = [as_mod_crop(img, scale) for img in imgs_gt]
+                print("gt size: {}".format(imgs_gt[0].shape))
+                if imgs_sr[0].shape != imgs_gt[0].shape:
+                    print('VideoINR need to BI adjust')
+                    # # torch BI -----------------------------------------------------------------------------------------
+                    # imgs_sr = img2tensor(imgs_sr)
+                    # imgs_sr = [T.Resize(size=(imgs_gt[0].shape[0], imgs_gt[0].shape[1]),
+                    #                    interpolation=InterpolationMode.BICUBIC, antialias=True)(img) for img in imgs_sr]
+                    # imgs_sr = [tensor2img(img) for img in imgs_sr]
+
+                    # -------- cv2 BI -------------------------------------------------------------------------------------
+                    imgs_sr = [cv2.resize(img, (imgs_gt[0].shape[1], imgs_gt[0].shape[0]), interpolation=cv2.INTER_AREA)
+                               for img in imgs_sr]
+
+                    # imgs_sr = [(img * 255.0).round().astype(np.uint8) for img in imgs_sr]
+
+            # as_mod_crop ---------------------------------------------------------------------------
+            if save_resize_img:
+                print('resize asymmetric sr, only crop GT')
                 print("after crop ......")
                 imgs_gt = [as_mod_crop(img, scale) for img in imgs_gt]
                 print("gt size: {}".format(imgs_gt[0].shape))
-                imgs_sr = [as_mod_crop(img, scale) for img in imgs_sr]      # list[ndarray(C,H,W)]
-                print("sr size: {}".format(imgs_sr[0].shape))
+            else:
+                if imgs_gt[0].shape == imgs_sr[0].shape:
+                    print("no crop ......")
+                else:
+                    print("after crop ......")
+                    imgs_gt = [as_mod_crop(img, scale) for img in imgs_gt]
+                    print("gt size: {}".format(imgs_gt[0].shape))
+                    if imgs_gt[0].shape == imgs_sr[0].shape:
+                        pass
+                    elif abs(imgs_gt[0].shape[0] - imgs_sr[0].shape[0]) < 5 or abs(imgs_gt[0].shape[1] - imgs_sr[0].shape[1]) < 5:
+                        print("The difference between sr and gt is not much, after crop ......")
+                        if imgs_gt[0].shape[0] - imgs_sr[0].shape[0] > 0:
+                            imgs_gt = [img_gt[0:imgs_sr[0].shape[0], ...] for img_gt in imgs_gt]
+                            print("gt size: {}".format(imgs_gt[0].shape))
+                        else:
+                            imgs_sr = [img_sr[0:imgs_gt[0].shape[0], ...] for img_sr in imgs_sr]
+                            print("sr size: {}".format(imgs_sr[0].shape))
+                    else:
+                        imgs_sr = [as_mod_crop(img, scale) for img in imgs_sr]  # list[ndarray(C,H,W)]
+                    print("sr size: {}".format(imgs_sr[0].shape))
 
-        # asymmetric scale BI resize
-        if imgs_gt[0].shape != imgs_sr[0].shape and scale[0] != scale[1]:
-            # use opencv to resize
-            imgs_sr = [cv2.resize(imgs_sr[i], (imgs_gt[0].shape[1], imgs_gt[0].shape[0]), interpolation=cv2.INTER_CUBIC)
-                       for i in range(max_id)]
-            print('after resize ......')
-            print("sr size: {}".format(imgs_sr[0].shape))
+            # asymmetric scale BI resize
+            if imgs_gt[0].shape != imgs_sr[0].shape and scale[0] != scale[1]:
+                # use opencv to resize
+                imgs_sr = [cv2.resize(imgs_sr[i], (imgs_gt[0].shape[1], imgs_gt[0].shape[0]), interpolation=cv2.INTER_CUBIC)
+                           for i in range(max_id)]
+                print('after resize ......')
+                print("sr size: {}".format(imgs_sr[0].shape))
+                if save_resize_img:
+                    i = 0
+                    for img_path_sr in img_paths_sr:
+                        img_name = osp.splitext(osp.basename(img_path_sr))[0]
+                        save_img_path = osp.join(sr_root + '_resize', subfoler_name, f'{img_name}.png')
+                        img_sr = imgs_sr[i]
+                        print(save_img_path)
+                        imwrite(img_sr, save_img_path)
+                        i += 1
+
+            imgs_psnr = []
+            imgs_ssim = []
+
+            for img_id, img_gt in enumerate(imgs_gt):
+                img_psnr = calculate_psnr(imgs_sr[img_id], img_gt, crop_border=0, test_y_channel=True)
+                imgs_psnr.append(img_psnr)
+                # print(img_psnr)
+                img_ssim = calculate_ssim(imgs_sr[img_id], img_gt, crop_border=0, test_y_channel=True)
+                imgs_ssim.append(img_ssim)
+                # print(img_ssim)
+
+            psnr_all.append(mean(imgs_psnr))
+            print("PSNR {}: {}".format(subfoler_name, mean(imgs_psnr)))
+            ssim_all.append(mean(imgs_ssim))
+            print("SSIM {}: {}".format(subfoler_name, mean(imgs_ssim)))
+            print("-" * 50)
+
+        print("avg PSNR: {}".format(mean(psnr_all)))
+        print("avg SSIM: {}".format(mean(ssim_all)))
+
+        print("current scale: {}".format(scale))
+        print("avg PSNR: {:.2f}".format(np.float64(mean(psnr_all))))
+        print("avg SSIM: {:.4f}".format(np.float64(mean(ssim_all))))
+        print('{:.2f}/{:.4f}'.format(np.float64(mean(psnr_all)), np.float64(mean(ssim_all))))
+        print("="*100 + "\n")
+
+
+def quick_test_isr(args):
+    """根据ISR后的结果快速验证 PSNR SSIM
+
+    :return:
+    """
+    # # init
+    # print(os.getcwd())
+    # print(os.path.abspath('.'))
+
+    # save the results of resize asymmetric sr
+    save_resize_img = False
+    is_y_channel = args.y_channel
+    is_bicubic_test = args.is_bicubic_test
+
+    # set sr and gt root path ---------------------------------------------------------------------------
+    # sr_root_ = '/data/lzk/workspace/liif/work_dir/rdn-liif/Set5'
+    # gt_root = '/data/lzk/workspace/LbasicSR/datasets/Set5/HR'
+    sr_root_ = args.sr_root
+    gt_root = args.gt_root
+    if 'div2k' in sr_root_.lower():
+        is_y_channel = False
+    # ---------------------------------------------------------------------------------------------------
+
+    # set scale ------------
+    # scales = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2,
+    #           2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
+    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
+    # scales = [(1.5, 4), (2, 4), (1.5, 3.5), (1.6, 3.05), (3.5, 2), (3.5, 1.75), (4, 1.4)]
+    # scales = [2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
+    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
+    # problem scales
+    # scales = [1.4, 2.3, 2.8]
+    # common scales
+    # scales = [2, 3, 4]
+    # scales = [3.5, 4]
+    scales = [2, 3, 4, 1.4, 2.5, 3.7]
+    # ----------------------
+
+    for scale in scales:
+        if isinstance(scale, tuple):
+            scale = scale
+            sr_root = osp.join(sr_root_, 'x{}_x{}'.format(scale[0], scale[1]))
+            save_resize_img = True
+        else:
+            scale = (scale, scale)
+            sr_root = osp.join(sr_root_, 'x{}'.format(scale[0]))
+        if is_bicubic_test:
+            sr_root = sr_root + "_bicubic_sr"
+        print('sr_root:', sr_root)
+        print('gt_root:', gt_root)
+
+        sr_imgs_path = sorted(glob.glob(osp.join(sr_root, '*.png')))
+
+        psnr_all = []
+        ssim_all = []
+
+        for sr_img_path in sr_imgs_path:
+            sr_img_name = sr_img_path.split("/")[-1]     # 0801.png
+            print(sr_img_name)
+            gt_img_path = osp.join(gt_root, sr_img_name)
+
+            img_gt = cv2.imread(gt_img_path, cv2.IMREAD_UNCHANGED)
+            print("gt shape: {}".format(img_gt.shape))
+            img_sr = cv2.imread(sr_img_path, cv2.IMREAD_UNCHANGED)
+            print("sr shape: {}".format(img_sr.shape))
+
+            # as_mod_crop ---------------------------------------------------------------------------
             if save_resize_img:
-                i = 0
-                for img_path_sr in img_paths_sr:
-                    img_name = osp.splitext(osp.basename(img_path_sr))[0]
-                    save_img_path = osp.join(sr_root+'_resize', subfoler_name, f'{img_name}.png')
-                    img_sr = imgs_sr[i]
+                print('resize asymmetric sr, only crop GT')
+                print("after crop ......")
+                img_gt = as_mod_crop(img_gt, scale)
+                print("gt shape: {}".format(img_gt.shape))
+            else:
+                if img_gt.shape == img_sr.shape:
+                    print("no crop ......")
+                else:
+                    print("gt after crop ......")
+                    img_gt = as_mod_crop(img_gt, scale)
+                    print("gt shape: {}".format(img_gt.shape))
+                    if img_gt.shape == img_sr.shape:
+                        pass
+                    elif abs(img_gt.shape[0] - img_sr.shape[0]) < 5 or abs(img_gt.shape[1] - img_sr.shape[1]) < 5:
+                        print("The difference between sr and gt is not much, after crop ......")
+                        if img_gt.shape[0] - img_sr.shape[0] > 0:   # H: GT > SR
+                            img_gt = img_gt[0:img_sr.shape[0], ...]
+                            print("gt shape: {}".format(img_gt.shape))
+                        else:
+                            img_sr = img_sr[0:img_gt.shape[0], ...]
+                            # print("sr shape: {}".format(img_sr.shape))
+                        if img_gt.shape[1] - img_sr.shape[1] > 0:   # W: GT > SR
+                            img_gt = img_gt[:, 0:img_sr.shape[1], ...]
+                            print("gt shape: {}".format(img_gt.shape))
+                        else:
+                            img_sr = img_sr[:, 0:img_gt.shape[1], ...]
+                            # print("sr shape: {}".format(img_sr.shape))
+                    else:
+                        img_sr = as_mod_crop(img_sr, scale)   # list[ndarray(C,H,W)]
+                    print("sr shape: {}".format(img_sr.shape))
+
+            # asymmetric scale BI resize
+            if img_gt.shape != img_sr.shape and scale[0] != scale[1]:
+                # use opencv to resize
+                img_sr = cv2.resize(img_sr, (img_gt.shape[1], img_gt.shape[0]), interpolation=cv2.INTER_CUBIC)
+                print('after resize ......')
+                print("sr shape: {}".format(img_sr.shape))
+                if save_resize_img:
+                    save_img_path = osp.join(sr_root + '_resize', sr_img_name)
                     print(save_img_path)
                     imwrite(img_sr, save_img_path)
-                    i += 1
 
-        imgs_psnr = []
-        imgs_ssim = []
+            img_psnr = calculate_psnr(img_sr, img_gt, crop_border=0, test_y_channel=is_y_channel)
+            psnr_all.append(img_psnr)
+            print("- PSNR: {}".format(img_psnr))
+            img_ssim = calculate_ssim(img_sr, img_gt, crop_border=0, test_y_channel=is_y_channel)
+            ssim_all.append(img_ssim)
+            print("- SSIM: {}".format(img_ssim))
+            print("-" * 100)
 
-        for img_id, img_gt in enumerate(imgs_gt):
-            img_psnr = calculate_psnr(imgs_sr[img_id], img_gt, crop_border=0, test_y_channel=True)
-            imgs_psnr.append(img_psnr)
-            # print(img_psnr)
-            img_ssim = calculate_ssim(imgs_sr[img_id], img_gt, crop_border=0, test_y_channel=True)
-            imgs_ssim.append(img_ssim)
-            # print(img_ssim)
+        print("avg PSNR: {}".format(mean(psnr_all)))
+        print("avg SSIM: {}".format(mean(ssim_all)))
 
-        psnr_all.append(mean(imgs_psnr))
-        print("PSNR {}: {}".format(subfoler_name, mean(imgs_psnr)))
-        ssim_all.append(mean(imgs_ssim))
-        print("SSIM {}: {}".format(subfoler_name, mean(imgs_ssim)))
-        print("-" * 50)
-
-    print("avg PSNR: {}".format(mean(psnr_all)))
-    print("avg SSIM: {}".format(mean(ssim_all)))
-
-    print("current scale: {}".format(scale))
-    print("avg PSNR: {:.2f}".format(np.float64(mean(psnr_all))))
-    print("avg SSIM: {:.4f}".format(np.float64(mean(ssim_all))))
-    print('{:.2f}/{:.4f}'.format(np.float64(mean(psnr_all)), np.float64(mean(ssim_all))))
+        print("current scale: {}".format(scale))
+        if is_y_channel:
+            print("Y channel")
+        else:
+            print("RGB channel")
+        print("avg PSNR: {:.2f}".format(np.float64(mean(psnr_all))))
+        print("avg SSIM: {:.4f}".format(np.float64(mean(ssim_all))))
+        print('{:.2f}/{:.4f}'.format(np.float64(mean(psnr_all)), np.float64(mean(ssim_all))))
+        print("="*100 + "\n")
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sr_root', default='/data/lzk/workspace/LbasicSR/datasets/Urban100/arbitrary_scale_BI')
+    parser.add_argument('--gt_root', default='/data/lzk/workspace/LbasicSR/datasets/Urban100/HR')
+    parser.add_argument('--y_channel', default=True)
+    parser.add_argument('--is_bicubic_test', default=True)
+
+    args = parser.parse_args()
+
     # hr_img = torch.randn([1, 7, 3, 720, 576])
     # print(hr_img.size())
     # lr_img = arbitrary_scale_downsample(hr_img, 4.0)
@@ -679,8 +828,9 @@ if __name__ == '__main__':
 
     # ======================
     # downsample_img()
-    # downsample_visual()
-    quick_test()
+    downsample_visual(degradation='BD')
+    # quick_test()
+    quick_test_isr(args)
     # ======================
 
     # ==================================
@@ -695,5 +845,3 @@ if __name__ == '__main__':
     #     print(step)
     #     print("="*50)
     # ==================================
-
-

@@ -114,6 +114,51 @@ class Upsample(nn.Sequential):
         super(Upsample, self).__init__(*m)
 
 
+class PixelShufflePack(nn.Module):
+    """Pixel Shuffle upsample layer.
+
+    Args:
+        in_channels (int): Number of input channels.
+        out_channels (int): Number of output channels.
+        scale_factor (int): Upsample ratio.
+        upsample_kernel (int): Kernel size of Conv layer to expand channels.
+
+    Returns:
+        Upsampled feature map.
+    """
+
+    def __init__(self, in_channels, out_channels, scale_factor, upsample_kernel):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.scale_factor = scale_factor
+        self.upsample_kernel = upsample_kernel
+        self.upsample_conv = nn.Conv2d(
+            self.in_channels,
+            self.out_channels * scale_factor * scale_factor,
+            self.upsample_kernel,
+            padding=(self.upsample_kernel - 1) // 2)
+        self.init_weights()
+
+    def init_weights(self):
+        """Initialize weights for PixelShufflePack.
+        """
+        default_init_weights(self, 1)
+
+    def forward(self, x):
+        """Forward function for PixelShufflePack.
+
+        Args:
+            x (Tensor): Input tensor with shape (n, c, h, w).
+
+        Returns:
+            Tensor: Forward results.
+        """
+        x = self.upsample_conv(x)
+        x = F.pixel_shuffle(x, self.scale_factor)
+        return x
+
+
 def flow_warp(x, flow, interp_mode='bilinear', padding_mode='zeros', align_corners=True):
     """Warp an image or feature map with optical flow.
 
@@ -198,7 +243,7 @@ def pixel_unshuffle(x, scale):
         Tensor: the pixel unshuffled feature.
     """
     b, c, hh, hw = x.size()
-    out_channel = c * (scale**2)
+    out_channel = c * (scale ** 2)
     assert hh % scale == 0 and hw % scale == 0
     h = hh // scale
     w = hw // scale
@@ -302,7 +347,6 @@ def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
 
 # From PyTorch
 def _ntuple(n):
-
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
             return x
@@ -316,3 +360,91 @@ to_2tuple = _ntuple(2)
 to_3tuple = _ntuple(3)
 to_4tuple = _ntuple(4)
 to_ntuple = _ntuple
+
+
+# =============================
+# for DASR (ECCV 2022)
+# =============================
+
+class Dynamic_conv2d(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=1, dilation=1, groups=1, if_bias=True, K=5,
+                 init_weight=False):
+        super(Dynamic_conv2d, self).__init__()
+        assert in_planes % groups == 0
+        self.in_planes = in_planes
+        self.out_planes = out_planes
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.if_bias = if_bias
+        self.K = K
+
+        self.weight = nn.Parameter(torch.randn(K, out_planes, in_planes // groups, kernel_size, kernel_size),
+                                   requires_grad=True)
+        if self.if_bias:
+            self.bias = nn.Parameter(torch.Tensor(K, out_planes), requires_grad=True)
+        else:
+            self.bias = None
+        if init_weight:
+            self._initialize_weights()
+
+    def _initialize_weights(self):
+        for i in range(self.K):
+            nn.init.kaiming_uniform_(self.weight[i])
+            if self.if_bias:
+                nn.init.constant_(self.bias[i], 0)
+
+    def forward(self, inputs):
+        x = inputs['x']
+        softmax_attention = inputs['weights']
+        batch_size, in_planes, height, width = x.size()
+        x = x.contiguous().view(1, -1, height, width)
+        weight = self.weight.view(self.K, -1)
+
+        aggregate_weight = torch.mm(softmax_attention, weight).view(-1, self.in_planes, self.kernel_size,
+                                                                    self.kernel_size)
+        if self.bias is not None:
+            aggregate_bias = torch.mm(softmax_attention, self.bias).view(-1)
+            output = F.conv2d(x, weight=aggregate_weight, bias=aggregate_bias, stride=self.stride, padding=self.padding,
+                              dilation=self.dilation, groups=self.groups * batch_size)
+        else:
+            output = F.conv2d(x, weight=aggregate_weight, bias=None, stride=self.stride, padding=self.padding,
+                              dilation=self.dilation, groups=self.groups * batch_size)
+
+        output = output.view(batch_size, self.out_planes, output.size(-2), output.size(-1))
+        return output
+
+
+class ResidualBlockNoBNDynamic(nn.Module):
+    """Residual block without BN.
+
+    It has a style of:
+        ---Conv-ReLU-Conv-+-
+         |________________|
+
+    Args:
+        num_feat (int): Channel number of intermediate features.
+            Default: 64.
+        res_scale (float): Residual scale. Default: 1.
+        pytorch_init (bool): If set to True, use pytorch default init,
+            otherwise, use default_init_weights. Default: False.
+    """
+
+    def __init__(self, num_feat=64, res_scale=1, num_models=5):
+        super(ResidualBlockNoBNDynamic, self).__init__()
+        self.res_scale = res_scale
+        self.conv1 = Dynamic_conv2d(num_feat, num_feat, 3, groups=1, if_bias=True, K=num_models)
+        self.conv2 = Dynamic_conv2d(num_feat, num_feat, 3, groups=1, if_bias=True, K=num_models)
+        self.relu = nn.ReLU(inplace=True)
+
+        default_init_weights([self.conv1, self.conv2], 0.1)
+
+    def forward(self, inputs):
+        identity = inputs['x'].clone()
+        out = self.relu(self.conv1(inputs))
+        conv2_input = {'x': out, 'weights': inputs['weights']}
+        out = self.conv2(conv2_input)
+        out = identity + out * self.res_scale
+        return {'x': out, 'weights': inputs['weights']}

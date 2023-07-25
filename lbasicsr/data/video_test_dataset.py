@@ -304,7 +304,8 @@ class ASVideoTestDataset(VideoTestDataset):
             img_paths_lq = [self.imgs_gt[folder][i] for i in select_idx]
             # read imgs_gt to generate arbitrary scale low-resolution frames
             imgs_lq = read_img_seq(img_paths_lq, require_as_mod_crop=True, scale=self.opt['scale'])
-            imgs_lq = arbitrary_scale_downsample(imgs_lq, scale=self.opt['scale'], mode=self.opt['downsampling_mode'])
+            if self.opt['use_arbitrary_scale_downsampling']:
+                imgs_lq = arbitrary_scale_downsample(imgs_lq, scale=self.opt['scale'], mode=self.opt['downsampling_mode'])
             img_gt = read_img_seq([self.imgs_gt[folder][idx]], require_as_mod_crop=True, scale=self.opt['scale'])
             img_gt.squeeze_(0)
 

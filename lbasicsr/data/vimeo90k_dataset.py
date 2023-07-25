@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 from torch.utils import data as data
 
-from lbasicsr.data.data_util import arbitrary_scale_downsample
+from lbasicsr.data.data_util import arbitrary_scale_downsample, generate_frame_indices
 from lbasicsr.data.transforms import augment, paired_random_crop, single_random_crop, single_random_spcrop, mod_crop
 from lbasicsr.utils import FileClient, get_root_logger, imfrombytes, img2tensor
 from lbasicsr.utils.registry import DATASET_REGISTRY
@@ -73,9 +73,20 @@ class Vimeo90KDataset(data.Dataset):
             self.is_lmdb = True
             self.io_backend_opt['db_paths'] = [self.lq_root, self.gt_root]
             self.io_backend_opt['client_keys'] = ['lq', 'gt']
-
+        
         # indices of input images
         self.neighbor_list = [i + (9 - opt['num_frame']) // 2 for i in range(opt['num_frame'])]
+        
+        # for more frame input ------------------------------------------------------------------------------
+        if opt['num_frame'] > 7:
+            self.neighbor_list = [i + (9 - 7) // 2 for i in range(7)]               # [1, 2, 3, 4, 5, 6, 7]
+            # head_list = generate_frame_indices(1, 7, 13, padding='reflection')      # [5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6, 5]
+            # tail_list = generate_frame_indices(7, 7, 13, padding='reflection')      # [1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1, 0, -1]
+            pad_len = (opt['num_frame'] - 7) // 2
+            head_list = self.neighbor_list[1:1+pad_len]
+            tail_list = self.neighbor_list[6-pad_len:-1]
+            self.neighbor_list = head_list[::-1] + self.neighbor_list + tail_list[::-1]         # [4, 3, 2, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4]
+        # ---------------------------------------------------------------------------------------------------
 
         # temporal augmentation configs
         self.random_reverse = opt['random_reverse']
@@ -145,6 +156,7 @@ class ASVimeo90KDataset(Vimeo90KDataset):
         self.epoch = 0
         self.init_int_scale = opt['init_int_scale']
         self.single_scale_ft = opt['single_scale_ft']
+        self.CL_train_set = opt['CL_train_set']
 
         self.scale_h_list = [
             1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
@@ -210,6 +222,24 @@ class ASVimeo90KDataset(Vimeo90KDataset):
     def set_epoch(self, epoch):
         self.epoch = epoch
 
+    def cl_train_stg(self):
+        if self.epoch >= self.CL_train_set[0]:
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+            return scale_h, scale_w
+        if self.epoch % 10 <= self.CL_train_set[1]:
+            scale_h, scale_w = 4, 4
+        elif self.CL_train_set[1] < self.epoch % 10 <= self.CL_train_set[2]:
+            scale_h = random.randint(2, 4)
+            scale_w = scale_h
+        elif self.epoch % 10 > self.CL_train_set[2]:
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+
+        return scale_h, scale_w
+
     def as_collate_fn(self, batch):
         out_batch = {}
         elem = batch[0]
@@ -230,7 +260,9 @@ class ASVimeo90KDataset(Vimeo90KDataset):
                 out_batch[key] = key_list
 
         # get arbitrary scale ------------------------------------------------
-        if self.single_scale_ft:
+        if self.CL_train_set is not None:
+            scale_h, scale_w = self.cl_train_stg()
+        elif self.single_scale_ft:
             scale_h = self.opt['scale'][0]
             scale_w = self.opt['scale'][1]
         elif self.epoch == 0 and self.init_int_scale:

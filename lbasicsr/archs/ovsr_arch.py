@@ -184,11 +184,11 @@ if __name__ == '__main__':
         num_frame=5).to(device)
     net.eval()
 
-    input = torch.rand(1, 5, 3, 64, 64).to(device)
-    get_flops(net, [5, 3, 180, 320])
+    input = torch.rand(1, 9, 3, 64, 64).to(device)
+    # get_flops(net, [9, 3, 180, 320])
 
     with torch.no_grad():
-        out = net(input)
+        out = net(input)[0]
 
     if isinstance(out, torch.Tensor):
         print(out.shape)

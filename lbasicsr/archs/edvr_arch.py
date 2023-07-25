@@ -352,21 +352,20 @@ class EDVR(nn.Module):
     def forward(self, x):
         b, t, c, h, w = x.size()
         origin_h, origin_w = h, w
-
         x_center = x[:, self.center_frame_idx, :, :, :].contiguous()
 
         if self.hr_in:
             assert h % 16 == 0 and w % 16 == 0, ('The height and width must be multiple of 16.')
         else:
             # assert h % 4 == 0 and w % 4 == 0, ('The height and width must be multiple of 4.')
-            if not (h % 4 == 0 and w % 4 == 0):
-                # print('\nThe height and width must be multiple of 4.')
-                x = x.view(-1, c, h, w)
-                h = int(h // 4) * 4
-                w = int(w // 4) * 4
-                x = T.Resize(size=(h, w), interpolation=InterpolationMode.BICUBIC)(x)
-                x = x.view(b, t, c, h, w)
-                # print('after resize: {}'.format(x.size()))
+            if w % 4 != 0:
+                pad_w = int(w // 4 + 1) * 4 - w
+                x = F.pad(x, (0, pad_w), mode='constant', value=0)
+            if h % 4 != 0:
+                pad_h = int(h // 4 + 1) * 4 - h
+                x = F.pad(x, (0, 0, 0, pad_h), mode='constant', value=0)
+
+        b, t, c, h, w = x.size()
 
         # extract features for each frame
         # L1
@@ -406,10 +405,7 @@ class EDVR(nn.Module):
         if not self.with_tsa:
             aligned_feat = aligned_feat.view(b, -1, h, w)
         feat = self.fusion(aligned_feat)
-
-        # restore the original resolution
-        if (origin_h, origin_w) != (h, w):
-            feat = T.Resize(size=(origin_h, origin_w), interpolation=InterpolationMode.BICUBIC)(feat)
+        feat = feat[..., 0:origin_h, 0:origin_w]
 
         out = self.reconstruction(feat)
         # -----------------------------------------------------------------
@@ -432,14 +428,14 @@ if __name__ == '__main__':
     # EDVR-M -----------------
     # net = EDVR().to(device)
     # EDVR-L -----------------
-    net = EDVR(num_feat=128, num_reconstruct_block=40).to(device)
+    net = EDVR(num_feat=128, num_reconstruct_block=40, scale=2).to(device)
     net.eval()
 
     # print(
     #     "EDVR have {:.3f}M parameters in total".format(sum(x.numel() for x in net.parameters()) / 1000000.0))
 
     input = torch.rand(1, 5, 3, 64, 64).to(device)
-    get_flops(net, [5, 3, 180, 320])
+    # get_flops(net, [5, 3, 180, 320])
 
     with torch.no_grad():
         out = net(input)
