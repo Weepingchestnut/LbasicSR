@@ -1,9 +1,9 @@
 # general settings
-name: 103_EDVR_L_x4_SR_Vimeo90K_woTSA_600k_B4G8_valVid4_wandb
-model_type: EDVRModel
+name: DUF_52L_Vimeo90K_BIx4
+model_type: VideoBaseModel
 scale: 4
 num_gpu: 1  # set num_gpu: 0 for cpu mode
-manual_seed: 10
+manual_seed: 0
 
 # dataset and data loader settings
 datasets:
@@ -12,23 +12,25 @@ datasets:
     type: Vimeo90KDataset
     dataroot_gt: datasets/vimeo90k/vimeo_septuplet/sequences
     dataroot_lq: datasets/vimeo90k/vimeo_septuplet_matlabLRx4/sequences
-    dataroot_flow: ~
     meta_info_file: lbasicsr/data/meta_info/meta_info_Vimeo90K_train_GT.txt
     io_backend:
       type: disk
 
     num_frame: 7
-    gt_size: 256
+    gt_size: 128    # 32 x 4 = 128
     interval_list: [1]
     random_reverse: false
     use_hflip: true
     use_rot: true
+    flip_sequence: false
 
     # data loader
     num_worker_per_gpu: 6
-    batch_size_per_gpu: 32
-    dataset_enlarge_ratio: 200
-    prefetch_mode: ~
+    batch_size_per_gpu: 16
+    dataset_enlarge_ratio: 1
+    prefetch_mode: cuda
+    pin_memory: True
+
 
   val:
     name: Vid4
@@ -39,71 +41,70 @@ datasets:
       type: disk
 
     cache_data: false
-    num_frame: 5
+    num_frame: 7
     padding: reflection_circle
 
 # network structures
 network_g:
-#  ema_decay: 0.999
-  type: EDVR
-  num_in_ch: 3
-  num_out_ch: 3
-  num_feat: 128
-  num_frame: 5
-  deformable_groups: 8
-  num_extract_block: 5
-  num_reconstruct_block: 40
-  center_frame_idx: ~
-  hr_in: false
-  with_predeblur: false
-  with_tsa: false
-  scale: 2
+  type: DUF
+  scale: 4
+  num_layer: 52
+  adapt_official_weights: true
 
 # path
 path:
   pretrain_network_g: ~
   strict_load_g: true
-  resume_state: ~
+  resume_state: experiments/DUF_52L_Vimeo90K_BIx4/training_states/4000.state
 
 # training settings
 train:
   optim_g:
     type: Adam
-    lr: !!float 4e-4
+    lr: !!float 1e-3
     weight_decay: 0
     betas: [0.9, 0.99]
 
   scheduler:
-    type: CosineAnnealingRestartLR
-    periods: [150000, 150000, 150000, 150000]
-    restart_weights: [1, 0.5, 0.5, 0.5]
-    eta_min: !!float 1e-7
+    # ============================================
+#    type: CosineAnnealingRestartLR
+#    periods: [ 50000, 50000, 50000, 50000 ]
+#    restart_weights: [ 1, 0.5, 0.5, 0.5 ]
+#    eta_min: !!float 1e-7
+    # ============================================
+    type: MultiStepLR
+    milestones: [ 50000, 100000, 150000, 200000 ]
+    gamma: 0.1
+    # ============================================
 
-  total_iter: 600000
+  total_iter: 200000
   warmup_iter: -1  # no warm up
-  dcn_lr_mul: 1
 
   # losses
   pixel_opt:
     type: CharbonnierLoss
     loss_weight: 1.0
-    reduction: sum
+    reduction: mean
 
 # validation settings
 val:
-  val_freq: !!float 5e3
+  val_freq: !!float 1e3
   save_img: false
 
   metrics:
-    psnr: # metric name, can be arbitrary
+    psnr_y: # metric name, can be arbitrary
       type: calculate_psnr
+      crop_border: 0
+      test_y_channel: true
+    ssim_y:
+      type: calculate_ssim
       crop_border: 0
       test_y_channel: true
 
 # logging settings
 logger:
   print_freq: 100
-  save_checkpoint_freq: !!float 5e3
+  save_checkpoint_freq: !!float 1e3
   use_tb_logger: true
   wandb:
     project: ~
@@ -113,3 +114,5 @@ logger:
 dist_params:
   backend: nccl
   port: 29500
+
+find_unused_parameters: true

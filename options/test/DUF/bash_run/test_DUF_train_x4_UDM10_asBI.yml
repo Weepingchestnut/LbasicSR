@@ -1,0 +1,79 @@
+!!python/object/apply:collections.OrderedDict
+- - - name
+    - DUF_52L_train_x4_UDM10_BI_x4
+  - - model_type
+    - VideoBaseModel
+  - - scale
+    - !!python/tuple
+      - 4
+      - 4
+  - - num_gpu
+    - 1
+  - - manual_seed
+    - 0
+  - - datasets
+    - !!python/object/apply:collections.OrderedDict
+      - - - test_as
+          - !!python/object/apply:collections.OrderedDict
+            - - - name
+                - UDM10
+              - - type
+                - ASVideoTestDataset
+              - - dataroot_gt
+                - datasets/UDM10/GT
+              - - dataroot_lq
+                - datasets/UDM10/torch_BIx4
+              - - io_backend
+                - !!python/object/apply:collections.OrderedDict
+                  - - - type
+                      - disk
+              - - cache_data
+                - false
+              - - num_frame
+                - 7
+              - - padding
+                - reflection_circle
+              - - use_arbitrary_scale_downsampling
+                - true
+              - - downsampling_mode
+                - torch
+  - - network_g
+    - !!python/object/apply:collections.OrderedDict
+      - - - type
+          - DUF
+        - - scale
+          - 4
+        - - num_layer
+          - 52
+        - - adapt_official_weights
+          - true
+  - - path
+    - !!python/object/apply:collections.OrderedDict
+      - - - pretrain_network_g
+          - experiments/DUF_52L_Vimeo90K_BIx4_0/models/net_g_latest.pth
+        - - strict_load_g
+          - true
+  - - val
+    - !!python/object/apply:collections.OrderedDict
+      - - - save_img
+          - true
+        - - suffix
+          - null
+        - - metrics
+          - !!python/object/apply:collections.OrderedDict
+            - - - psnr_y
+                - !!python/object/apply:collections.OrderedDict
+                  - - - type
+                      - calculate_psnr
+                    - - crop_border
+                      - 8
+                    - - test_y_channel
+                      - true
+              - - ssim_y
+                - !!python/object/apply:collections.OrderedDict
+                  - - - type
+                      - calculate_ssim
+                    - - crop_border
+                      - 8
+                    - - test_y_channel
+                      - true

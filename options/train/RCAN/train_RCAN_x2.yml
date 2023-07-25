@@ -11,8 +11,8 @@ datasets:
   train:
     name: DIV2K
     type: PairedImageDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/DIV2K/DIV2K_train_HR_sub
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/DIV2K/DIV2K_train_LR_bicubic/X2_sub
+    dataroot_gt: datasets/DIV2K/DIV2K_train_HR_sub
+    dataroot_lq: datasets/DIV2K/DIV2K_train_LR_bicubic/X2_sub
     # (for lmdb)
     # dataroot_gt: datasets/DIV2K/DIV2K_train_HR_sub.lmdb
     # dataroot_lq: datasets/DIV2K/DIV2K_train_LR_bicubic_X2_sub.lmdb
@@ -35,8 +35,8 @@ datasets:
   val:
     name: Set5
     type: PairedImageDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/Set5/GTmod12
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/Set5/LRbicx2
+    dataroot_gt: datasets/Set5/GTmod12
+    dataroot_lq: datasets/Set5/LRbicx2
     io_backend:
       type: disk
 

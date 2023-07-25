@@ -1,0 +1,97 @@
+!!python/object/apply:collections.OrderedDict
+- - - name
+    - EDVR_L_x2_transfer_UDM10_SR_x(4, 1.4)
+  - - model_type
+    - EDVRModel
+  - - scale
+    - !!python/tuple
+      - 4
+      - 1.4
+  - - num_gpu
+    - 1
+  - - manual_seed
+    - 0
+  - - datasets
+    - !!python/object/apply:collections.OrderedDict
+      - - - test
+          - !!python/object/apply:collections.OrderedDict
+            - - - name
+                - Vid4
+              - - type
+                - ASVideoTestDataset
+              - - dataroot_gt
+                - datasets/UDM10/GT
+              - - dataroot_lq
+                - datasets/UDM10/BIx4
+              - - io_backend
+                - !!python/object/apply:collections.OrderedDict
+                  - - - type
+                      - disk
+              - - cache_data
+                - false
+              - - num_frame
+                - 5
+              - - padding
+                - reflection_circle
+              - - use_arbitrary_scale_downsampling
+                - true
+              - - downsampling_mode
+                - torch
+  - - network_g
+    - !!python/object/apply:collections.OrderedDict
+      - - - type
+          - EDVR
+        - - num_in_ch
+          - 3
+        - - num_out_ch
+          - 3
+        - - num_feat
+          - 128
+        - - num_frame
+          - 5
+        - - deformable_groups
+          - 8
+        - - num_extract_block
+          - 5
+        - - num_reconstruct_block
+          - 40
+        - - center_frame_idx
+          - null
+        - - hr_in
+          - false
+        - - with_predeblur
+          - false
+        - - with_tsa
+          - true
+        - - scale
+          - 2
+  - - path
+    - !!python/object/apply:collections.OrderedDict
+      - - - pretrain_network_g
+          - experiments/104_EDVR_L_x2_transfer_SR_Vimeo90K_600k_B4G8_valVid4_103pretrain_wandb/models/net_g_65000.pth
+        - - strict_load_g
+          - true
+  - - val
+    - !!python/object/apply:collections.OrderedDict
+      - - - save_img
+          - true
+        - - suffix
+          - null
+        - - metrics
+          - !!python/object/apply:collections.OrderedDict
+            - - - psnr_y
+                - !!python/object/apply:collections.OrderedDict
+                  - - - type
+                      - calculate_psnr
+                    - - crop_border
+                      - 0
+                    - - test_y_channel
+                      - true
+              - - ssim_y
+                - !!python/object/apply:collections.OrderedDict
+                  - - - type
+                      - calculate_ssim
+                    - - crop_border
+                      - 0
+                    - - test_y_channel
+                      - true
