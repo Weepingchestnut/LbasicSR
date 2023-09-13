@@ -66,7 +66,7 @@ class VideoTestDataset(data.Dataset):
             subfolders_lq = sorted(glob.glob(osp.join(self.lq_root, '*')))
             subfolders_gt = sorted(glob.glob(osp.join(self.gt_root, '*')))
 
-        if opt['name'].lower() in ['vid4', 'reds4', 'redsofficial', 'udm10']:
+        if opt['name'].lower().split('_')[0] in ['vid4', 'reds4', 'redsofficial', 'udm10']:
             for subfolder_lq, subfolder_gt in zip(subfolders_lq, subfolders_gt):    # 循环读取每个视频序列：calendar,city,
                 # get frame list for lq and gt
                 subfolder_name = osp.basename(subfolder_lq)
@@ -93,15 +93,15 @@ class VideoTestDataset(data.Dataset):
                     logger.info(f'Cache {subfolder_name} for VideoTestDataset...')
                     # self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
                     # self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt)
-                    # for x3 scale ---------------------------------------------------------------------------------
-                    self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
-                    self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt,
-                                                                require_mod_crop=True, scale=self.opt['scale'])
-                    # # arbitrary scale need as_mod_crop -----------------------------------------------------------
-                    # self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq,
-                    #                                             require_as_mod_crop=True, scale=self.opt['scale'])
+                    # # for x3 scale ---------------------------------------------------------------------------------
+                    # self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
                     # self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt,
-                    #                                             require_as_mod_crop=True, scale=self.opt['scale'])
+                    #                                             require_mod_crop=True, scale=self.opt['scale'])
+                    # for arbitrary-scale need as_mod_crop -----------------------------------------------------------
+                    self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq,
+                                                                require_as_mod_crop=True, scale=self.opt['scale'])
+                    self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt,
+                                                                require_as_mod_crop=True, scale=self.opt['scale'])
                 else:
                     self.imgs_lq[subfolder_name] = img_paths_lq
                     self.imgs_gt[subfolder_name] = img_paths_gt
@@ -265,7 +265,7 @@ class VideoTestDUFDataset(VideoTestDataset):
 class ASVideoTestDataset(VideoTestDataset):
     """ Arbitrary scale Video test dataset.
 
-    Supported datasets: Vid4, REDS4, REDSofficial.
+    Supported datasets: Vid4, UDM10, REDS4, REDSofficial.
 
     Args:
         opt (dict): Config for train dataset. It contains the following keys:

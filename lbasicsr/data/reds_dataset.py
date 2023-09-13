@@ -216,30 +216,48 @@ class ASREDSDataset(REDSDataset):
         self.epoch = 0
         self.init_int_scale = opt['init_int_scale']
         self.single_scale_ft = opt['single_scale_ft']
+        self.CL_train_set = opt['CL_train_set']
+        if opt.__contains__('only_sy_scale'):
+            self.only_sy_scale = opt['only_sy_scale']
+        else:
+            self.only_sy_scale = False
 
-        self.scale_h_list = [
-            1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
-            2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
-            3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
-            1.5, 1.5, 1.5, 1.5, 1.5,
-            2.0, 2.0, 2.0, 2.0, 2.0,
-            2.5, 2.5, 2.5, 2.5, 2.5,
-            3.0, 3.0, 3.0, 3.0, 3.0,
-            3.5, 3.5, 3.5, 3.5, 3.5,
-            4.0, 4.0, 4.0, 4.0, 4.0,
-        ]
+        if self.only_sy_scale:
+            self.scale_h_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+            ]
 
-        self.scale_w_list = [
-            1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
-            2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
-            3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
-            2.0, 2.5, 3.0, 3.5, 4.0,
-            1.5, 2.5, 3.0, 3.5, 4.0,
-            1.5, 2.0, 3.0, 3.5, 4.0,
-            1.5, 2.0, 2.5, 3.5, 4.0,
-            1.5, 2.0, 2.5, 3.0, 4.0,
-            1.5, 2.0, 2.5, 3.0, 3.5,
-        ]
+            self.scale_w_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+            ]
+        else:
+            self.scale_h_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+                1.5, 1.5, 1.5, 1.5, 1.5,
+                2.0, 2.0, 2.0, 2.0, 2.0,
+                2.5, 2.5, 2.5, 2.5, 2.5,
+                3.0, 3.0, 3.0, 3.0, 3.0,
+                3.5, 3.5, 3.5, 3.5, 3.5,
+                4.0, 4.0, 4.0, 4.0, 4.0,
+            ]
+
+            self.scale_w_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+                2.0, 2.5, 3.0, 3.5, 4.0,
+                1.5, 2.5, 3.0, 3.5, 4.0,
+                1.5, 2.0, 3.0, 3.5, 4.0,
+                1.5, 2.0, 2.5, 3.5, 4.0,
+                1.5, 2.0, 2.5, 3.0, 4.0,
+                1.5, 2.0, 2.5, 3.0, 3.5,
+            ]
 
     def __getitem__(self, index):
         if self.file_client is None:
@@ -280,85 +298,37 @@ class ASREDSDataset(REDSDataset):
             img_gts.append(img_gt)
         # -----------------------------------------------------------------------------
 
-        # # get the neighboring LQ frames
-        # img_lqs = []
-        # for neighbor in neighbor_list:
-        #     if self.is_lmdb:
-        #         img_lq_path = f'{clip_name}/{neighbor:08d}'
-        #     else:
-        #         img_lq_path = self.lq_root / clip_name / f'{neighbor:08d}.png'
-        #     img_bytes = self.file_client.get(img_lq_path, 'lq')
-        #     img_lq = imfrombytes(img_bytes, float32=True)
-        #     img_lqs.append(img_lq)
-
-        # # get flows
-        # if self.flow_root is not None:
-        #     img_flows = []
-        #     # read previous flows
-        #     for i in range(self.num_half_frames, 0, -1):
-        #         if self.is_lmdb:
-        #             flow_path = f'{clip_name}/{frame_name}_p{i}'
-        #         else:
-        #             flow_path = (self.flow_root / clip_name / f'{frame_name}_p{i}.png')
-        #         img_bytes = self.file_client.get(flow_path, 'flow')
-        #         cat_flow = imfrombytes(img_bytes, flag='grayscale', float32=False)  # uint8, [0, 255]
-        #         dx, dy = np.split(cat_flow, 2, axis=0)
-        #         flow = dequantize_flow(dx, dy, max_val=20, denorm=False)  # we use max_val 20 here.
-        #         img_flows.append(flow)
-        #     # read next flows
-        #     for i in range(1, self.num_half_frames + 1):
-        #         if self.is_lmdb:
-        #             flow_path = f'{clip_name}/{frame_name}_n{i}'
-        #         else:
-        #             flow_path = (self.flow_root / clip_name / f'{frame_name}_n{i}.png')
-        #         img_bytes = self.file_client.get(flow_path, 'flow')
-        #         cat_flow = imfrombytes(img_bytes, flag='grayscale', float32=False)  # uint8, [0, 255]
-        #         dx, dy = np.split(cat_flow, 2, axis=0)
-        #         flow = dequantize_flow(dx, dy, max_val=20, denorm=False)  # we use max_val 20 here.
-        #         img_flows.append(flow)
-        #
-        #     # for random crop, here, img_flows and img_lqs have the same
-        #     # spatial size
-        #     img_lqs.extend(img_flows)
-
-        # randomly crop
-        # img_gt, img_lqs = paired_random_crop(img_gt, img_lqs, gt_size, scale, img_gt_path)
-        # if self.flow_root is not None:
-        #     img_lqs, img_flows = img_lqs[:self.num_frame], img_lqs[self.num_frame:]
-
-        # # augmentation - flip, rotate
-        # img_lqs.append(img_gt)
-        # if self.flow_root is not None:
-        #     img_results, img_flows = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'], img_flows)
-        # else:
-        #     img_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
-
-        # img_results = img2tensor(img_results)
-        # img_lqs = torch.stack(img_results[0:-1], dim=0)
-        # img_gt = img_results[-1]
         img_gts = img2tensor(img_gts)  # list
         img_gts = torch.stack(img_gts, dim=0)
 
-        # if self.flow_root is not None:
-        #     img_flows = img2tensor(img_flows)
-        #     # add the zero center flow
-        #     img_flows.insert(self.num_half_frames, torch.zeros_like(img_flows[0]))
-        #     img_flows = torch.stack(img_flows, dim=0)
-
-        # img_flows: (t, 2, h, w)
-        # img_gt: (t, c, h, w)
-        # key: str
-        # if self.flow_root is not None:
-        #     return {'lq': img_lqs, 'flow': img_flows, 'gt': img_gt, 'key': key}
-        # else:
-        #     return {'gt': img_gts, 'key': key}
         return {'gt': img_gts, 'key': key}
 
     def set_epoch(self, epoch):
         self.epoch = epoch
+    
+    def cl_train_stg(self):
+        """Continuous learning training strategies.
 
-    def __len__(self):
-        return len(self.keys)
+        Returns:
+            int: scale_h
+            int: scale_w
+        """
+        if self.epoch >= self.CL_train_set[0]:
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+            return scale_h, scale_w
+        if self.epoch % 10 <= self.CL_train_set[1]:     # only scale = 4
+            scale_h, scale_w = 4, 4
+        elif self.CL_train_set[1] < self.epoch % 10 <= self.CL_train_set[2]:    # scale = 2, 3, 4
+            scale_h = random.randint(2, 4)
+            scale_w = scale_h
+        elif self.epoch % 10 > self.CL_train_set[2]:    # full scales
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+
+        return scale_h, scale_w
 
     def as_collate_fn(self, batch):
         out_batch = {}
@@ -380,7 +350,9 @@ class ASREDSDataset(REDSDataset):
                 out_batch[key] = key_list
 
         # get arbitrary scale ------------------------------------------------
-        if self.single_scale_ft:
+        if self.CL_train_set is not None:
+            scale_h, scale_w = self.cl_train_stg()
+        elif self.single_scale_ft:
             scale_h = self.opt['scale'][0]
             scale_w = self.opt['scale'][1]
         elif self.epoch == 0 and self.init_int_scale:
@@ -390,6 +362,7 @@ class ASREDSDataset(REDSDataset):
             idx_scale = random.randrange(0, len(self.scale_h_list))
             scale_h = self.scale_h_list[idx_scale]
             scale_w = self.scale_w_list[idx_scale]
+        
         lq_size = self.opt['lq_size']
         gt_size = (round(lq_size * scale_h), round(lq_size * scale_w))
 

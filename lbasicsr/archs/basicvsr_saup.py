@@ -93,22 +93,24 @@ class SA_upsample(nn.Module):
         input = torch.cat((
             torch.ones_like(coor_h).expand([-1, round(scale2 * w)]).unsqueeze(0) / scale2,  # 1 x H x W
             torch.ones_like(coor_h).expand([-1, round(scale2 * w)]).unsqueeze(0) / scale,
-            coor_h.expand([-1, round(scale2 * w)]).unsqueeze(0),                            # 1 x H x W
+            coor_h.expand([-1, round(scale2 * w)]).unsqueeze(0),  # 1 x H x W
             coor_w.expand([round(scale * h), -1]).unsqueeze(0)
         ), 0).unsqueeze(0)
         # ===================================================================================================
 
         # (2) predict filters and offsets ==============================================
-        embedding = self.body(input)        # torch.Size([1, 64, 75, 75])
+        embedding = self.body(input)  # torch.Size([1, 64, 75, 75])
         # offsets
-        offset = self.offset(embedding)     # torch.Size([1, 2, 75, 75])
+        offset = self.offset(embedding)  # torch.Size([1, 2, 75, 75])
 
         # filters
-        routing_weights = self.routing(embedding)   # torch.Size([1, 4, H, W])
+        routing_weights = self.routing(embedding)  # torch.Size([1, 4, H, W])
         routing_weights = routing_weights.view(
-            self.num_experts, round(scale * h) * round(scale2 * w)).transpose(0, 1)  # (H*W) * n    torch.Size([5625, 4])
+            self.num_experts, round(scale * h) * round(scale2 * w)).transpose(0,
+                                                                              1)  # (H*W) * n    torch.Size([5625, 4])
 
-        weight_compress = self.weight_compress.view(self.num_experts, -1)  # torch.Size([n=4, Cout=8, Cin=64, ks=1, ks=1]) --> torch.Size([4, 512])
+        weight_compress = self.weight_compress.view(self.num_experts,
+                                                    -1)  # torch.Size([n=4, Cout=8, Cin=64, ks=1, ks=1]) --> torch.Size([4, 512])
         weight_compress = torch.matmul(routing_weights, weight_compress)  # torch.Size([225, 512])
         weight_compress = weight_compress.view(
             1, round(scale * h), round(scale2 * w), self.channels // 8, self.channels)  # torch.Size([1, H, W, 8, 64])
@@ -182,7 +184,7 @@ class BasicVSR(nn.Module):
         flows_forward = self.spynet(x_2, x_1).view(b, n - 1, 2, h, w)
 
         return flows_forward, flows_backward
-    
+
     def set_scale(self, scale: Union[tuple, float, int]):
         self.scale = scale
 
@@ -219,8 +221,8 @@ class BasicVSR(nn.Module):
             feat_prop = self.forward_trunk(feat_prop)
 
             # upsample
-            out = torch.cat([out_l[i], feat_prop], dim=1)               # torch.Size([4, 128, 64, 64])
-            out = self.lrelu(self.fusion(out))                          # torch.Size([4, 64, 64, 64])
+            out = torch.cat([out_l[i], feat_prop], dim=1)  # torch.Size([4, 128, 64, 64])
+            out = self.lrelu(self.fusion(out))  # torch.Size([4, 64, 64, 64])
             # ------------------------------------------------------------------------------------------
             # out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))     # torch.Size([4, 64, 128, 128])
             # out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))     # torch.Size([4, 64, 256, 256])
@@ -481,7 +483,7 @@ if __name__ == '__main__':
     device = 'cpu'
 
     num_frame = 7
-    
+
     scale = (1.2, 1.2)
     model = BasicVSR().to(device)
     model.set_scale(scale)

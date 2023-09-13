@@ -2,6 +2,7 @@ import torch
 from collections import Counter
 from os import path as osp
 from torch import distributed as dist
+from torch.nn.parallel import DataParallel, DistributedDataParallel
 from tqdm import tqdm
 
 from lbasicsr.metrics import calculate_metric
@@ -195,3 +196,33 @@ class VideoRecurrentModel(VideoBaseModel):
             self.output = self.output[:, n // 2, :, :, :]
 
         self.net_g.train()
+
+
+@MODEL_REGISTRY.register()
+class ASVideoRecurrentModel(VideoRecurrentModel):
+
+    def __init__(self, opt):
+        super(ASVideoRecurrentModel, self).__init__(opt)
+    
+    def optimize_parameters(self, current_iter):
+        if self.fix_flow_iter:
+            logger = get_root_logger()
+            if current_iter == 1:
+                logger.info(f'Fix flow network and feature extractor for {self.fix_flow_iter} iters.')
+                for name, param in self.net_g.named_parameters():
+                    if 'spynet' in name or 'edvr' in name:
+                        param.requires_grad_(False)
+            elif current_iter == self.fix_flow_iter:
+                logger.warning('Train all the parameters.')
+                self.net_g.requires_grad_(True)
+
+        if hasattr(self, 'scale'):
+            if isinstance(self.net_g, (DataParallel, DistributedDataParallel)):
+                self.net_g.module.set_scale(self.scale)
+            else:
+                self.net_g.set_scale(self.scale)
+            print('current iteration scale: {}'.format(self.scale))
+
+        super(VideoRecurrentModel, self).optimize_parameters(current_iter)
+    
+    
