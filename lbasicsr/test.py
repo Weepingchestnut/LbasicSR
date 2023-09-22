@@ -36,7 +36,11 @@ def test_pipeline(root_path):
 
     for test_loader in test_loaders:
         test_set_name = test_loader.dataset.opt['name']
-        test_scale = opt['scale']
+        # test_scale = opt['scale']
+        if 'downsampling_scale' in test_loader.dataset.opt.keys():
+            test_scale = test_loader.dataset.opt['downsampling_scale']
+        else:
+            test_scale = opt['scale']
         logger.info(f'Testing {test_set_name} x{test_scale}...')
         model.validation(test_loader, current_iter=opt['name'], tb_logger=None, save_img=opt['val']['save_img'])
 

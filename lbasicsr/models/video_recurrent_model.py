@@ -225,4 +225,31 @@ class ASVideoRecurrentModel(VideoRecurrentModel):
 
         super(VideoRecurrentModel, self).optimize_parameters(current_iter)
     
+    def test(self):
+        n = self.lq.size(1)     # 当前视频序列帧数
+        self.net_g.eval()
+
+        flip_seq = self.opt['val'].get('flip_seq', False)
+        self.center_frame_only = self.opt['val'].get('center_frame_only', False)
+
+        if flip_seq:
+            self.lq = torch.cat([self.lq, self.lq.flip(1)], dim=1)
+
+        with torch.no_grad():
+            if isinstance(self.net_g, (DataParallel, DistributedDataParallel)):
+                self.net_g.module.set_scale(self.scale)
+            else:
+                self.net_g.set_scale(self.scale)
+            self.output = self.net_g(self.lq)
+
+        if flip_seq:
+            output_1 = self.output[:, :n, :, :, :]
+            output_2 = self.output[:, n:, :, :, :].flip(1)
+            self.output = 0.5 * (output_1 + output_2)
+
+        if self.center_frame_only:
+            self.output = self.output[:, n // 2, :, :, :]
+
+        self.net_g.train()
+    
     

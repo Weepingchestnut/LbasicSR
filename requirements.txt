@@ -1,4 +1,5 @@
 addict
+cupy
 future
 lmdb
 numpy>=1.17
@@ -12,6 +13,7 @@ tb-nightly
 torch>=1.9
 torchvision
 tqdm
+wandb
 yapf
 timm>=0.6
 

@@ -3,7 +3,7 @@ import glob
 import os
 
 from math import floor
-from typing import Union
+from typing import Union, Tuple
 
 import cv2
 import numpy as np
@@ -24,7 +24,7 @@ from lbasicsr.utils import img2tensor, scandir, tensor2img, imwrite
 from lbasicsr.data.core import imresize
 
 
-def read_img_seq(path, require_mod_crop=False, require_as_mod_crop=False, scale=(1, 1), return_imgname=False):
+def read_img_seq(path, require_mod_crop=False, require_as_mod_crop=False, scale: Tuple = (4, 4), return_imgname=False):
     """Read a sequence of images from a given folder path.
 
     Args:
@@ -388,7 +388,7 @@ def arbitrary_scale_downsample(x: Tensor, scale: Union[tuple, float], mode='torc
 
 def downsample_img():
     # ------ init -------------------------------------------------------------------------------------------
-    is_bi_sr = True    # if generate bicubic sr results at the same time
+    is_bi_sr = True  # if generate bicubic sr results at the same time
 
     gt_path = '/data/lzk/workspace/LbasicSR/datasets/DIV2K/DIV2K_valid_HR'
     save_path_ = '/data/lzk/workspace/LbasicSR/datasets/DIV2K/DIV2K_valid_arbitrary_scale_BI'
@@ -456,25 +456,36 @@ def downsample_img():
             print('-' * 100)
 
 
-def downsample_visual(degradation='BI'):
+def downsample_video(data_root: str, gt_dir: str = 'GT', degradation: str = 'BI'):
     # init
-    gt_root = '/data/lzk/workspace/LbasicSR/datasets/UDM10/GT'
+    # gt_root = '/data/lzk/workspace/LbasicSR/datasets/Vid4/GT'
+    gt_root = osp.join(data_root, gt_dir)
     if degradation == 'BI':
-        save_path = '/data/lzk/workspace/LbasicSR/datasets/UDM10/arbitrary_scale_BI'
+        # save_path = '/data/lzk/workspace/LbasicSR/datasets/UDM10/arbitrary_scale_BI'
+        save_path_ = osp.join(data_root, 'arbitrary_scale_BI')
     else:
-        save_path = '/data/lzk/workspace/LbasicSR/datasets/UDM10/arbitrary_scale_BD'
+        # save_path = '/data/lzk/workspace/LbasicSR/datasets/UDM10/arbitrary_scale_BD'
+        save_path_ = osp.join(data_root, 'arbitrary_scale_BD')
+
     subfolers_gt = sorted(glob.glob(osp.join(gt_root, '*')))
 
-    # scales = [(3.25, 3.25)]
-    # scales = [(1.1, 1.1), (1.2, 1.2), (1.3, 1.3), (1.4, 1.4), (1.5, 1.5), (1.6, 1.6), (1.7, 1.7), (1.8, 1.8), (1.9, 1.9), (2, 2),
-    #           (2.1, 2.1), (2.2, 2.2), (2.3, 2.3), (2.4, 2.4), (2.5, 2.5), (2.6, 2.6), (2.7, 2.7), (2.8, 2.8), (2.9, 2.9), (3, 3),
-    #           (3.1, 3.1), (3.2, 3.2), (3.3, 3.3), (3.4, 3.4), (3.5, 3.5), (3.6, 3.6), (3.7, 3.7), (3.8, 3.8), (3.9, 3.9),
-    #           (1.5, 4), (2, 4), (1.5, 3.5), (1.6, 3.05), (3.5, 2), (3.5, 1.75), (4, 1.4)]
-    
-    # scales = [(2, 3.75), (1.7, 3.75), (2.95, 3.75), (3.9, 2), (3.5, 1.5)]
-    scales = [(4, 4)]
+    # scales = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2,
+    #           2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
+    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
+    scales = [(1.5, 4), (2, 4), (2, 3.75), (1.5, 3.5), (1.6, 3.05), (1.7, 3.75), 
+              (2.95, 3.75), (3.9, 2), (3.5, 1.5), (3.5, 2), (3.5, 1.75), (4, 1.4)]
+
+    if degradation == 'BD':
+        scales = [2, 3, 4]
 
     for scale in scales:
+        if isinstance(scale, tuple):
+            scale = scale
+            save_path = osp.join(save_path_, "x{}_x{}".format(scale[0], scale[1]))
+        else:
+            scale = (scale, scale)
+            save_path = osp.join(save_path_, "x{}".format(scale[0]))
+
         for subfoler_gt in subfolers_gt:
             subfoler_name = osp.basename(subfoler_gt)
             print(subfoler_name)
@@ -483,7 +494,8 @@ def downsample_visual(degradation='BI'):
             max_id = len(img_paths_gt)
             print(max_id)
             # print(img_paths_gt)
-            imgs_gt = read_img_seq(img_paths_gt, require_as_mod_crop=True, scale=scale)  # Tensor [41, 3, 576, 720], [0, 1] range
+            imgs_gt = read_img_seq(img_paths_gt, require_as_mod_crop=True,
+                                   scale=scale)  # Tensor [41, 3, 576, 720], [0, 1] range
             print(imgs_gt.size())
             imgs_gt = imgs_gt.unsqueeze(0)
             print(imgs_gt.size())
@@ -494,10 +506,7 @@ def downsample_visual(degradation='BI'):
             i = 0
             for img_path_gt in img_paths_gt:
                 img_name = osp.splitext(osp.basename(img_path_gt))[0]
-                if scale[0] == scale[1]:
-                    save_img_path = osp.join(save_path, f'x{scale[0]}', subfoler_name, f'{img_name}.png')
-                else:
-                    save_img_path = osp.join(save_path, f'x{scale[0]}_x{scale[1]}', subfoler_name, f'{img_name}.png')
+                save_img_path = osp.join(save_path, subfoler_name, f'{img_name}.png')
                 img_lr = imgs_lr[:, i, ...]  # 按帧取
                 result_img_lr = tensor2img(img_lr)
                 print('{}/{}: {}'.format(i + 1, len(img_paths_gt), save_img_path))
@@ -512,7 +521,7 @@ def quick_test():
     :return:
     """
     # # init
-    # print(os.getcwd())
+    # print(os.getcwd())imim
     # print(os.path.abspath('.'))
 
     # save the results of resize asymmetric sr
@@ -520,20 +529,20 @@ def quick_test():
     videoinr = False
 
     # set sr and gt root path ---------------------------------------------------------------------------
-    sr_root_ = '/data/lzk/workspace/LbasicSR/results/ArbSR/Vid4/asy'
+    sr_root_ = '/data/lzk/workspace/lmmsr/work_dirs/basicvsr-pp_c64n7_4xb2-300k_vimeo90k-bi/Vid4'
     gt_root = '/data/lzk/workspace/LbasicSR/datasets/Vid4/GT'
     # ---------------------------------------------------------------------------------------------------
 
     # set scale ------------
-    # scales = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2,
-    #           2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
-    #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
+    scales = [1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+              2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+              3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0]
     # scales = [(1.5, 4), (2, 4), (1.5, 3.5), (1.6, 3.05), (3.5, 2), (3.5, 1.75), (4, 1.4)]
     # scales = [2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
     #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
     # scales = [(3.5, 2), (3.5, 1.75), (4, 1.4)]
     # scales = [(2, 3.75), (1.7, 3.75), (2.95, 3.75), (3.9, 2), (3.5, 1.5)]
-    scales = [ (3.5, 2), (3.5, 1.75), (4, 1.4)]
+    # scales = [(3.5, 2), (3.5, 1.75), (4, 1.4)]
     # ----------------------
 
     for scale in scales:
@@ -624,7 +633,8 @@ def quick_test():
                     print("gt size: {}".format(imgs_gt[0].shape))
                     if imgs_gt[0].shape == imgs_sr[0].shape:
                         pass
-                    elif abs(imgs_gt[0].shape[0] - imgs_sr[0].shape[0]) < 5 or abs(imgs_gt[0].shape[1] - imgs_sr[0].shape[1]) < 5:
+                    elif abs(imgs_gt[0].shape[0] - imgs_sr[0].shape[0]) < 5 or abs(
+                            imgs_gt[0].shape[1] - imgs_sr[0].shape[1]) < 5:
                         print("The difference between sr and gt is not much, after crop ......")
                         if imgs_gt[0].shape[0] - imgs_sr[0].shape[0] > 0:
                             imgs_gt = [img_gt[0:imgs_sr[0].shape[0], ...] for img_gt in imgs_gt]
@@ -639,8 +649,9 @@ def quick_test():
             # asymmetric scale BI resize
             if imgs_gt[0].shape != imgs_sr[0].shape and scale[0] != scale[1]:
                 # use opencv to resize
-                imgs_sr = [cv2.resize(imgs_sr[i], (imgs_gt[0].shape[1], imgs_gt[0].shape[0]), interpolation=cv2.INTER_CUBIC)
-                           for i in range(max_id)]
+                imgs_sr = [
+                    cv2.resize(imgs_sr[i], (imgs_gt[0].shape[1], imgs_gt[0].shape[0]), interpolation=cv2.INTER_CUBIC)
+                    for i in range(max_id)]
                 print('after resize ......')
                 print("sr size: {}".format(imgs_sr[0].shape))
                 if save_resize_img:
@@ -677,7 +688,7 @@ def quick_test():
         print("avg PSNR: {:.2f}".format(np.float64(mean(psnr_all))))
         print("avg SSIM: {:.4f}".format(np.float64(mean(ssim_all))))
         print('{:.2f}/{:.4f}'.format(np.float64(mean(psnr_all)), np.float64(mean(ssim_all))))
-        print("="*100 + "\n")
+        print("=" * 100 + "\n")
 
 
 def quick_test_isr(args):
@@ -737,7 +748,7 @@ def quick_test_isr(args):
         ssim_all = []
 
         for sr_img_path in sr_imgs_path:
-            sr_img_name = sr_img_path.split("/")[-1]     # 0801.png
+            sr_img_name = sr_img_path.split("/")[-1]  # 0801.png
             print(sr_img_name)
             gt_img_path = osp.join(gt_root, sr_img_name)
 
@@ -763,20 +774,20 @@ def quick_test_isr(args):
                         pass
                     elif abs(img_gt.shape[0] - img_sr.shape[0]) < 5 or abs(img_gt.shape[1] - img_sr.shape[1]) < 5:
                         print("The difference between sr and gt is not much, after crop ......")
-                        if img_gt.shape[0] - img_sr.shape[0] > 0:   # H: GT > SR
+                        if img_gt.shape[0] - img_sr.shape[0] > 0:  # H: GT > SR
                             img_gt = img_gt[0:img_sr.shape[0], ...]
                             print("gt shape: {}".format(img_gt.shape))
                         else:
                             img_sr = img_sr[0:img_gt.shape[0], ...]
                             # print("sr shape: {}".format(img_sr.shape))
-                        if img_gt.shape[1] - img_sr.shape[1] > 0:   # W: GT > SR
+                        if img_gt.shape[1] - img_sr.shape[1] > 0:  # W: GT > SR
                             img_gt = img_gt[:, 0:img_sr.shape[1], ...]
                             print("gt shape: {}".format(img_gt.shape))
                         else:
                             img_sr = img_sr[:, 0:img_gt.shape[1], ...]
                             # print("sr shape: {}".format(img_sr.shape))
                     else:
-                        img_sr = as_mod_crop(img_sr, scale)   # list[ndarray(C,H,W)]
+                        img_sr = as_mod_crop(img_sr, scale)  # list[ndarray(C,H,W)]
                     print("sr shape: {}".format(img_sr.shape))
 
             # asymmetric scale BI resize
@@ -809,7 +820,7 @@ def quick_test_isr(args):
         print("avg PSNR: {:.2f}".format(np.float64(mean(psnr_all))))
         print("avg SSIM: {:.4f}".format(np.float64(mean(ssim_all))))
         print('{:.2f}/{:.4f}'.format(np.float64(mean(psnr_all)), np.float64(mean(ssim_all))))
-        print("="*100 + "\n")
+        print("=" * 100 + "\n")
 
 
 if __name__ == '__main__':
@@ -828,9 +839,9 @@ if __name__ == '__main__':
 
     # ======================
     # downsample_img()
-    downsample_visual(degradation='BD')
+    downsample_video(data_root='/data/lzk/workspace/LbasicSR/datasets/UDM10', gt_dir='GT', degradation='BI')
     # quick_test()
-    quick_test_isr(args)
+    # quick_test_isr(args)
     # ======================
 
     # ==================================

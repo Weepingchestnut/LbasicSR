@@ -18,10 +18,20 @@ def init_dist(launcher, backend='nccl', **kwargs):
         raise ValueError(f'Invalid launcher type: {launcher}')
 
 
+# def _init_dist_pytorch(backend, **kwargs):
+#     rank = int(os.environ['RANK'])
+#     num_gpus = torch.cuda.device_count()
+#     torch.cuda.set_device(rank % num_gpus)
+#     dist.init_process_group(backend=backend, **kwargs)
+
+
 def _init_dist_pytorch(backend, **kwargs):
-    rank = int(os.environ['RANK'])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    # print('local_rank:', local_rank)
     num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(rank % num_gpus)
+    # print('num_gpus:', num_gpus)
+    torch.cuda.set_device(local_rank % num_gpus)
+    # print('local_rank % num_gpus:', local_rank % num_gpus)
     dist.init_process_group(backend=backend, **kwargs)
 
 

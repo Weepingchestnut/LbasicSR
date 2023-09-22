@@ -200,6 +200,10 @@ class ASVimeo90KDataset(Vimeo90KDataset):
                 1.5, 2.0, 2.5, 3.0, 3.5,
                 # 6.0, 7.0, 7.5, 8.0
             ]
+        
+        if opt.__contains__('scale_h_list') and opt.__contains__('scale_w_list'):
+            self.scale_h_list = opt['scale_h_list']
+            self.scale_w_list = opt['scale_w_list']
 
     def __getitem__(self, index):
         if self.file_client is None:
@@ -304,110 +308,12 @@ class ASVimeo90KDataset(Vimeo90KDataset):
 
 
 @DATASET_REGISTRY.register()
-class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
+class ASVimeo90KRecurrentDataset(ASVimeo90KDataset):
     def __init__(self, opt):
         super(ASVimeo90KRecurrentDataset, self).__init__(opt)
 
         self.flip_sequence = opt['flip_sequence']
         self.neighbor_list = [1, 2, 3, 4, 5, 6, 7]
-
-        self.epoch = 0
-        self.init_int_scale = opt['init_int_scale']
-        self.single_scale_ft = opt['single_scale_ft']
-
-        # self.scale_h_list = [
-        #     1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
-        #     2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
-        #     3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
-        #     1.5, 1.5, 1.5, 1.5, 1.5,
-        #     2.0, 2.0, 2.0, 2.0, 2.0,
-        #     2.5, 2.5, 2.5, 2.5, 2.5,
-        #     3.0, 3.0, 3.0, 3.0, 3.0,
-        #     3.5, 3.5, 3.5, 3.5, 3.5,
-        #     4.0, 4.0, 4.0, 4.0, 4.0,
-        # ]
-        self.scale_h_list = [4, 1.2]
-
-        # self.scale_w_list = [
-        #     1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
-        #     2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
-        #     3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
-        #     2.0, 2.5, 3.0, 3.5, 4.0,
-        #     1.5, 2.5, 3.0, 3.5, 4.0,
-        #     1.5, 2.0, 3.0, 3.5, 4.0,
-        #     1.5, 2.0, 2.5, 3.5, 4.0,
-        #     1.5, 2.0, 2.5, 3.0, 4.0,
-        #     1.5, 2.0, 2.5, 3.0, 3.5,
-        # ]
-        self.scale_w_list = [4, 3.8]
-
-    # def __getitem__(self, index):
-    #     if self.file_client is None:
-    #         self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
-    #
-    #     # random reverse
-    #     if self.random_reverse and random.random() < 0.5:
-    #         self.neighbor_list.reverse()
-    #
-    #     # =================================================================
-    #     # get arbitrary scale
-    #     # scale = self.opt['scale']
-    #     scale = random.randrange(11, self.opt['scale'] * 10 + 1) / 10
-    #     # gt_size = self.opt['gt_size']
-    #     lq_size = self.opt['lq_size']
-    #     gt_size = round(lq_size * scale)
-    #     # =================================================================
-    #     key = self.keys[index]
-    #     clip, seq = key.split('/')  # key example: 00001/0001
-    #
-    #     # get the neighboring GT frames
-    #     img_lqs = []
-    #     img_gts = []
-    #     for neighbor in self.neighbor_list:
-    #         if self.is_lmdb:
-    #             # img_lq_path = f'{clip}/{seq}/im{neighbor}'
-    #             img_gt_path = f'{clip}/{seq}/im{neighbor}'
-    #         else:
-    #             # img_lq_path = self.lq_root / clip / seq / f'im{neighbor}.png'
-    #             img_gt_path = self.gt_root / clip / seq / f'im{neighbor}.png'
-    #         # LQ
-    #         # img_bytes = self.file_client.get(img_lq_path, 'lq')
-    #         # img_lq = imfrombytes(img_bytes, float32=True)
-    #         # GT
-    #         img_bytes = self.file_client.get(img_gt_path, 'gt')
-    #         img_gt = imfrombytes(img_bytes, float32=True)       # ndarry (256, 448, 3) [0, 1]
-    #         # # LQ
-    #         # if self.opt['downsample_mode'] == 'ndarray':
-    #         #     img_lq = imresize(img_gt, scale)
-    #         #     img_lqs.append(img_lq)
-    #
-    #         img_gts.append(img_gt)
-    #
-    #     # randomly crop
-    #     # img_gts, img_lqs = paired_random_crop(img_gts, img_lqs, gt_size, scale, img_gt_path)
-    #     img_gts = single_random_crop(img_gts, gt_size)
-    #     if self.opt['downsample_mode'] == 'numpy':
-    #         img_lqs = [imresize(img_gt, lq_size, lq_size, 1/scale) for img_gt in img_gts]
-    #         # augmentation - flip, rotate
-    #         img_lqs.extend(img_gts)
-    #         img_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
-    #
-    #         img_results = img2tensor(img_results)
-    #         img_lqs = torch.stack(img_results[:7], dim=0)
-    #         img_gts = torch.stack(img_results[7:], dim=0)
-    #     if self.opt['downsample_mode'] == 'torch':
-    #         img_gts = img2tensor(img_gts)
-    #         img_lqs = T.Resize(size=(lq_size, lq_size), interpolation=InterpolationMode.BICUBIC,
-    #                            antialias=True)(img_gts)
-    #
-    #     if self.flip_sequence:  # flip the sequence: 7 frames to 14 frames
-    #         img_lqs = torch.cat([img_lqs, img_lqs.flip(0)], dim=0)
-    #         img_gts = torch.cat([img_gts, img_gts.flip(0)], dim=0)
-    #
-    #     # img_lqs: (t, c, h, w)
-    #     # img_gt: (c, h, w)
-    #     # key: str
-    #     return {'lq': img_lqs, 'gt': img_gts, 'scale': scale, 'key': key}
 
     def __getitem__(self, index):
         if self.file_client is None:
@@ -434,8 +340,8 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
             img_gts.append(img_gt)
 
         # make the img size always 256x448x3 --------------------
-        if img_gts[0].shape != (256, 448, 3):
-            img_gts = single_random_spcrop(img_gts, (256, 448))
+        # if img_gts[0].shape != (256, 448, 3):
+        #     img_gts = single_random_spcrop(img_gts, (256, 448))
         # -------------------------------------------------------
 
         # augmentation - flip, rotate
@@ -451,9 +357,6 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
 
     def __len__(self):
         return len(self.keys)
-
-    def set_epoch(self, epoch):
-        self.epoch = epoch
 
     def as_collate_fn(self, batch):
         out_batch = {}
@@ -475,7 +378,9 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
                 out_batch[key] = key_list
 
         # get arbitrary scale --------------------------------------------------
-        if self.single_scale_ft:
+        if self.CL_train_set is not None:
+            scale_h, scale_w = self.cl_train_stg()
+        elif self.single_scale_ft:
             scale_h = self.opt['scale'][0]
             scale_w = self.opt['scale'][1]
         elif self.epoch == 0 and self.init_int_scale:
@@ -485,7 +390,6 @@ class ASVimeo90KRecurrentDataset(Vimeo90KDataset):
             idx_scale = random.randrange(0, len(self.scale_h_list))
             scale_h = self.scale_h_list[idx_scale]
             scale_w = self.scale_w_list[idx_scale]
-            # scale = random.randrange(11, self.opt['scale'] * 10 + 1) / 10
         lq_size = self.opt['lq_size']
         gt_size = (round(lq_size * scale_h), round(lq_size * scale_w))
         # ----------------------------------------------------------------------

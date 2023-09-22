@@ -6,6 +6,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
+from torch.nn import functional as F
 
 from lbasicsr.utils.registry import ARCH_REGISTRY
 from lbasicsr.archs.arch_util import trunc_normal_, to_2tuple
@@ -71,7 +72,9 @@ def window_partition(x, window_size):
         windows: (num_windows*b, window_size, window_size, c)
     """
     b, h, w, c = x.shape
-    x = x.view(b, h // window_size, window_size, w // window_size, window_size, c)
+    x = x.view(b, h // window_size, window_size, w // window_size, window_size, c)              # [B, H方向的num_window, Wh, W方向的num_window, Ww, C]
+    # permute: [B, H方向的num_window, Wh, W方向的num_window, Ww, C] --> [B, H方向的num_window, W方向的num_window, Wh, Ww, C]
+    # view: [B*num_windows, Wh, Ww, C]
     windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, c)
     return windows
 
@@ -123,7 +126,7 @@ class WindowAttention(nn.Module):
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
-        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w], indexing='ij'))  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
@@ -148,11 +151,16 @@ class WindowAttention(nn.Module):
             x: input features with shape of (num_windows*b, n, c)
             mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
         """
-        b_, n, c = x.shape
-        qkv = self.qkv(x).reshape(b_, n, 3, self.num_heads, c // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
+        b_, n, c = x.shape      # [B*num_windows(B_), Wh*Ww(n), C]
+        # qkv():    -> [B_, n, 3*C]
+        # reshape:  -> [B_, n, 3, num_heads, embed_dim_per_head(C_h)]
+        # permute:  -> [3, B_, num_heads, n, C_h]
+        qkv = self.qkv(x).reshape(b_, n, 3, self.num_heads, c // self.num_heads).permute(2, 0, 3, 1, 4)     # [3, B_, num_heads, n, C//num_heads]
+        q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)     q, k, v = qkv.unbind(0)     [B_, num_heads, n, C_h]
 
         q = q * self.scale
+        # transpose:    -> [B_, num_heads, n, C_h]
+        # @: multiply   -> [B_, num_heads, n, n]
         attn = (q @ k.transpose(-2, -1))
 
         relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
@@ -161,15 +169,20 @@ class WindowAttention(nn.Module):
         attn = attn + relative_position_bias.unsqueeze(0)
 
         if mask is not None:
-            nw = mask.shape[0]
+            nw = mask.shape[0]      # num_windows
+            # attn.view:        -> [B, num_windows, num_heads, n, n]
+            # mask.unsqueeze:   -> [1, num_windows, 1, n, n]
             attn = attn.view(b_ // nw, nw, self.num_heads, n, n) + mask.unsqueeze(1).unsqueeze(0)
-            attn = attn.view(-1, self.num_heads, n, n)
+            attn = attn.view(-1, self.num_heads, n, n)      # [B_, num_heads, n, n]
             attn = self.softmax(attn)
         else:
             attn = self.softmax(attn)
 
         attn = self.attn_drop(attn)
 
+        # @: multiply   -> [B_, num_heads, n, n] @ [B_, num_heads, n, C_h] = [B_, num_heads, n, C_h]
+        # transpose:    -> [B_, n, num_heads, C_h]
+        # reshape:      -> [B_, n, C]
         x = (attn @ v).transpose(1, 2).reshape(b_, n, c)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -265,7 +278,7 @@ class SwinTransformerBlock(nn.Module):
         h, w = x_size
         img_mask = torch.zeros((1, h, w, 1))  # 1 h w 1
         h_slices = (slice(0, -self.window_size), slice(-self.window_size,
-                                                       -self.shift_size), slice(-self.shift_size, None))
+                                                       -self.shift_size), slice(-self.shift_size, None))        # slice 切片
         w_slices = (slice(0, -self.window_size), slice(-self.window_size,
                                                        -self.shift_size), slice(-self.shift_size, None))
         cnt = 0
@@ -274,9 +287,9 @@ class SwinTransformerBlock(nn.Module):
                 img_mask[:, h, w, :] = cnt
                 cnt += 1
 
-        mask_windows = window_partition(img_mask, self.window_size)  # nw, window_size, window_size, 1
-        mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
-        attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
+        mask_windows = window_partition(img_mask, self.window_size)                     # num_windows, window_size(Wh), window_size(Ww), 1
+        mask_windows = mask_windows.view(-1, self.window_size * self.window_size)       # num_windows, Wh*Ww
+        attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)               # [num_windows, 1, Wh*Ww] - [num_windows, Wh*Ww, 1]
         attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
 
         return attn_mask
@@ -441,7 +454,7 @@ class BasicLayer(nn.Module):
                 input_resolution=input_resolution,
                 num_heads=num_heads,
                 window_size=window_size,
-                shift_size=0 if (i % 2 == 0) else window_size // 2,
+                shift_size=0 if (i % 2 == 0) else window_size // 2,     # W-MSA, SW-MSA 成对使用
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
@@ -757,6 +770,8 @@ class SwinIR(nn.Module):
             self.mean = torch.zeros(1, 1, 1, 1)
         self.upscale = upscale
         self.upsampler = upsampler
+        
+        self.window_size = window_size
 
         # ------------------------- 1, shallow feature extraction ------------------------- #
         self.conv_first = nn.Conv2d(num_in_ch, embed_dim, 3, 1, 1)
@@ -878,7 +893,7 @@ class SwinIR(nn.Module):
 
     def forward_features(self, x):
         x_size = (x.shape[2], x.shape[3])
-        x = self.patch_embed(x)
+        x = self.patch_embed(x)                     # [B, h*w, C(180)]
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
@@ -894,10 +909,18 @@ class SwinIR(nn.Module):
     def forward(self, x):
         self.mean = self.mean.type_as(x)
         x = (x - self.mean) * self.img_range
+        
+        # padding
+        _, _, h, w = x.shape
+        pad_input = (h % self.window_size != 0) or (w % self.window_size != 0)
+        if pad_input:
+            x = F.pad(x, (0, self.window_size - w % self.window_size,   # 左右
+                          0, self.window_size - h % self.window_size,   # 上下
+                          0, 0))                                        # 前后
 
         if self.upsampler == 'pixelshuffle':
             # for classical SR
-            x = self.conv_first(x)
+            x = self.conv_first(x)                                      # [B, 180, h, w]
             x = self.conv_after_body(self.forward_features(x)) + x
             x = self.conv_before_upsample(x)
             x = self.conv_last(self.upsample(x))
@@ -937,23 +960,135 @@ class SwinIR(nn.Module):
 
 
 if __name__ == '__main__':
+    from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+    
     upscale = 4
     window_size = 8
     height = (1024 // upscale // window_size + 1) * window_size
     width = (720 // upscale // window_size + 1) * window_size
+    # classical image SR
     model = SwinIR(
-        upscale=2,
+        upscale=upscale,
         img_size=(height, width),
         window_size=window_size,
         img_range=1.,
-        depths=[6, 6, 6, 6],
-        embed_dim=60,
-        num_heads=[6, 6, 6, 6],
+        depths=[6, 6, 6, 6, 6, 6],
+        embed_dim=180,
+        num_heads=[6, 6, 6, 6, 6, 6],
         mlp_ratio=2,
-        upsampler='pixelshuffledirect')
+        upsampler='pixelshuffle')
+    
+    # lightweight image SR
+    # model = SwinIR(
+    #     upscale=upscale,
+    #     img_size=(height, width),
+    #     window_size=window_size,
+    #     img_range=1.,
+    #     depths=[6, 6, 6, 6],
+    #     embed_dim=60,
+    #     num_heads=[6, 6, 6, 6],
+    #     mlp_ratio=2,
+    #     upsampler='pixelshuffledirect')
+    
     print(model)
-    print(height, width, model.flops() / 1e9)
+    # print(height, width, model.flops() / 1e9)
+    
+    print(
+        "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
 
     x = torch.randn((1, 3, height, width))
+    print(flop_count_table(FlopCountAnalysis(model, x), activations=ActivationCountAnalysis(model, x)))
     x = model(x)
     print(x.shape)
+
+
+"""
+lightweight image SR
+
+264 184 49.6495296
+Model have 0.930M parameters in total
+| module                            | #parameters or shape   | #flops     | #activations   |
+|:----------------------------------|:-----------------------|:-----------|:---------------|
+| model                             | 0.93M                  | 52.465G    | 1.027G         |
+|  conv_first                       |  1.68K                 |  78.693M   |  2.915M        |
+|   conv_first.weight               |   (60, 3, 3, 3)        |            |                |
+|   conv_first.bias                 |   (60,)                |            |                |
+|  patch_embed.norm                 |  0.12K                 |  14.573M   |  0             |
+|   patch_embed.norm.weight         |   (60,)                |            |                |
+|   patch_embed.norm.bias           |   (60,)                |            |                |
+|  layers                           |  0.869M                |  49.524G   |  1.019G        |
+|   layers.0                        |   0.217M               |   12.381G  |   0.255G       |
+|    layers.0.residual_group.blocks |    0.185M              |    10.807G |    0.252G      |
+|    layers.0.conv                  |    32.46K              |    1.574G  |    2.915M      |
+|   layers.1                        |   0.217M               |   12.381G  |   0.255G       |
+|    layers.1.residual_group.blocks |    0.185M              |    10.807G |    0.252G      |
+|    layers.1.conv                  |    32.46K              |    1.574G  |    2.915M      |
+|   layers.2                        |   0.217M               |   12.381G  |   0.255G       |
+|    layers.2.residual_group.blocks |    0.185M              |    10.807G |    0.252G      |
+|    layers.2.conv                  |    32.46K              |    1.574G  |    2.915M      |
+|   layers.3                        |   0.217M               |   12.381G  |   0.255G       |
+|    layers.3.residual_group.blocks |    0.185M              |    10.807G |    0.252G      |
+|    layers.3.conv                  |    32.46K              |    1.574G  |    2.915M      |
+|  norm                             |  0.12K                 |  14.573M   |  0             |
+|   norm.weight                     |   (60,)                |            |                |
+|   norm.bias                       |   (60,)                |            |                |
+|  conv_after_body                  |  32.46K                |  1.574G    |  2.915M        |
+|   conv_after_body.weight          |   (60, 60, 3, 3)       |            |                |
+|   conv_after_body.bias            |   (60,)                |            |                |
+|  upsample.0                       |  25.968K               |  1.259G    |  2.332M        |
+|   upsample.0.weight               |   (48, 60, 3, 3)       |            |                |
+|   upsample.0.bias                 |   (48,)                |            |                |
+torch.Size([1, 3, 1056, 736])
+
+classical image SR
+
+Model have 11.900M parameters in total
+| module                            | #parameters or shape   | #flops     | #activations   |
+|:----------------------------------|:-----------------------|:-----------|:---------------|
+| model                             | 11.9M                  | 0.638T     | 3.327G         |
+|  conv_first                       |  5.04K                 |  0.236G    |  8.744M        |
+|   conv_first.weight               |   (180, 3, 3, 3)       |            |                |
+|   conv_first.bias                 |   (180,)               |            |                |
+|  patch_embed.norm                 |  0.36K                 |  43.718M   |  0             |
+|   patch_embed.norm.weight         |   (180,)               |            |                |
+|   patch_embed.norm.bias           |   (180,)               |            |                |
+|  layers                           |  11.202M               |  0.582T    |  3.242G        |
+|   layers.0                        |   1.867M               |   96.95G   |   0.54G        |
+|    layers.0.residual_group.blocks |    1.575M              |    82.785G |    0.532G      |
+|    layers.0.conv                  |    0.292M              |    14.165G |    8.744M      |
+|   layers.1                        |   1.867M               |   96.95G   |   0.54G        |
+|    layers.1.residual_group.blocks |    1.575M              |    82.785G |    0.532G      |
+|    layers.1.conv                  |    0.292M              |    14.165G |    8.744M      |
+|   layers.2                        |   1.867M               |   96.95G   |   0.54G        |
+|    layers.2.residual_group.blocks |    1.575M              |    82.785G |    0.532G      |
+|    layers.2.conv                  |    0.292M              |    14.165G |    8.744M      |
+|   layers.3                        |   1.867M               |   96.95G   |   0.54G        |
+|    layers.3.residual_group.blocks |    1.575M              |    82.785G |    0.532G      |
+|    layers.3.conv                  |    0.292M              |    14.165G |    8.744M      |
+|   layers.4                        |   1.867M               |   96.95G   |   0.54G        |
+|    layers.4.residual_group.blocks |    1.575M              |    82.785G |    0.532G      |
+|    layers.4.conv                  |    0.292M              |    14.165G |    8.744M      |
+|   layers.5                        |   1.867M               |   96.95G   |   0.54G        |
+|    layers.5.residual_group.blocks |    1.575M              |    82.785G |    0.532G      |
+|    layers.5.conv                  |    0.292M              |    14.165G |    8.744M      |
+|  norm                             |  0.36K                 |  43.718M   |  0             |
+|   norm.weight                     |   (180,)               |            |                |
+|   norm.bias                       |   (180,)               |            |                |
+|  conv_after_body                  |  0.292M                |  14.165G   |  8.744M        |
+|   conv_after_body.weight          |   (180, 180, 3, 3)     |            |                |
+|   conv_after_body.bias            |   (180,)               |            |                |
+|  conv_before_upsample.0           |  0.104M                |  5.036G    |  3.109M        |
+|   conv_before_upsample.0.weight   |   (64, 180, 3, 3)      |            |                |
+|   conv_before_upsample.0.bias     |   (64,)                |            |                |
+|  upsample                         |  0.295M                |  35.814G   |  62.177M       |
+|   upsample.0                      |   0.148M               |   7.163G   |   12.435M      |
+|    upsample.0.weight              |    (256, 64, 3, 3)     |            |                |
+|    upsample.0.bias                |    (256,)              |            |                |
+|   upsample.2                      |   0.148M               |   28.651G  |   49.742M      |
+|    upsample.2.weight              |    (256, 64, 3, 3)     |            |                |
+|    upsample.2.bias                |    (256,)              |            |                |
+|  conv_last                        |  1.731K                |  1.343G    |  2.332M        |
+|   conv_last.weight                |   (3, 64, 3, 3)        |            |                |
+|   conv_last.bias                  |   (3,)                 |            |                |
+torch.Size([1, 3, 1056, 736])
+"""

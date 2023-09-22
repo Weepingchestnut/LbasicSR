@@ -99,9 +99,9 @@ class VideoTestDataset(data.Dataset):
                     #                                             require_mod_crop=True, scale=self.opt['scale'])
                     # for arbitrary-scale need as_mod_crop -----------------------------------------------------------
                     self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq,
-                                                                require_as_mod_crop=True, scale=self.opt['scale'])
+                                                                require_as_mod_crop=True, scale=self.opt['downsampling_scale'])
                     self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt,
-                                                                require_as_mod_crop=True, scale=self.opt['scale'])
+                                                                require_as_mod_crop=True, scale=self.opt['downsampling_scale'])
                 else:
                     self.imgs_lq[subfolder_name] = img_paths_lq
                     self.imgs_gt[subfolder_name] = img_paths_gt
@@ -386,6 +386,7 @@ class ASVideoRecurrentTestDataset(ASVideoTestDataset):
             'lq': imgs_lq,
             'gt': imgs_gt,
             'folder': folder,
+            'scale': self.opt['scale']
         }
 
     def __len__(self):

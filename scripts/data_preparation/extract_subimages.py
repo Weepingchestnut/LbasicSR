@@ -6,7 +6,7 @@ from multiprocessing import Pool
 from os import path as osp
 from tqdm import tqdm
 
-from basicsr.utils import scandir
+from lbasicsr.utils import scandir
 
 
 def main():
