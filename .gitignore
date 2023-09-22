@@ -1,14 +1,3 @@
-.idea/
-datasets/*
-experiments/*
-results/*
-tb_logger/*
-wandb/*
-tmp/*
-nohup.out
-mytest/
-train_ovsr.sh
-
 *.DS_Store
 
 # Byte-compiled / optimized / DLL files
@@ -40,12 +29,30 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+.idea/*
+datasets/*
+experiments/*
+results/*
+scripts/*
+tb_logger/*
+test_scripts/*
+tests/*
+
+mytest/*
+
 lbasicsr/archs/ablation
-options/train/ASVSR/ablation
+lbasicsr/archs/stan
+lbasicsr/archs/asvsr*
 
 lbasicsr/data/psnr_log
 lbasicsr/data/gen_lr_log
+lbasicsr/data/psnr_test.sh
+
+options/train/ASVSR
+options/test/ASVSR
 
 ablation.sh
-options/test/ASVSR
-tb_logger/
+run_bash.sh
+run_test.py
+nohup.out
+train_ovsr.sh
