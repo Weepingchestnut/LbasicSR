@@ -1,6 +1,3 @@
-import math
-from typing import Union
-import numpy as np
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
@@ -9,127 +6,6 @@ from lbasicsr.utils.registry import ARCH_REGISTRY
 from lbasicsr.archs.arch_util import ResidualBlockNoBN, flow_warp, make_layer
 from lbasicsr.archs.edvr_arch import PCDAlignment, TSAFusion
 from lbasicsr.archs.spynet_arch import SpyNet
-
-
-def grid_sample(x, offset, scale, scale2):
-    # generate grids
-    b, _, h, w = x.size()
-    grid = np.meshgrid(range(round(scale2 * w)), range(round(scale * h)))
-    grid = np.stack(grid, axis=-1).astype(np.float64)
-    grid = torch.Tensor(grid).to(x.device)
-
-    # project into LR space
-    grid[:, :, 0] = (grid[:, :, 0] + 0.5) / scale2 - 0.5
-    grid[:, :, 1] = (grid[:, :, 1] + 0.5) / scale - 0.5
-
-    # normalize to [-1, 1]
-    grid[:, :, 0] = grid[:, :, 0] * 2 / (w - 1) - 1
-    grid[:, :, 1] = grid[:, :, 1] * 2 / (h - 1) - 1
-    grid = grid.permute(2, 0, 1).unsqueeze(0)
-    grid = grid.expand([b, -1, -1, -1])
-
-    # add offsets
-    offset_0 = torch.unsqueeze(offset[:, 0, :, :] * 2 / (w - 1), dim=1)
-    offset_1 = torch.unsqueeze(offset[:, 1, :, :] * 2 / (h - 1), dim=1)
-    grid = grid + torch.cat((offset_0, offset_1), 1)
-    grid = grid.permute(0, 2, 3, 1)
-
-    # sampling
-    output = F.grid_sample(x, grid, padding_mode='zeros', align_corners=True)
-    # UserWarning: Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0.
-    # Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
-
-    return output
-
-
-class SA_upsample(nn.Module):
-    def __init__(self, channels, num_experts=4, bias=False):
-        super(SA_upsample, self).__init__()
-        self.bias = bias
-        self.num_experts = num_experts
-        self.channels = channels
-
-        # experts
-        weight_compress = []
-        for i in range(num_experts):
-            weight_compress.append(nn.Parameter(torch.Tensor(channels // 8, channels, 1, 1)))
-            nn.init.kaiming_uniform_(weight_compress[i], a=math.sqrt(5))
-        self.weight_compress = nn.Parameter(torch.stack(weight_compress, 0))
-
-        weight_expand = []
-        for i in range(num_experts):
-            weight_expand.append(nn.Parameter(torch.Tensor(channels, channels // 8, 1, 1)))
-            nn.init.kaiming_uniform_(weight_expand[i], a=math.sqrt(5))
-        self.weight_expand = nn.Parameter(torch.stack(weight_expand, 0))
-
-        # two FC layers
-        self.body = nn.Sequential(
-            nn.Conv2d(4, 64, 1, 1, 0, bias=True),
-            nn.ReLU(True),
-            nn.Conv2d(64, 64, 1, 1, 0, bias=True),
-            nn.ReLU(True),
-        )
-        # routing head
-        self.routing = nn.Sequential(
-            nn.Conv2d(64, num_experts, 1, 1, 0, bias=True),  # 1x1 conv
-            nn.Sigmoid()
-        )
-        # offset head
-        self.offset = nn.Conv2d(64, 2, 1, 1, 0, bias=True)  # 1x1 conv
-
-    def forward(self, x, scale, scale2):
-        b, c, h, w = x.size()
-
-        # (1) coordinates in LR space =======================================================================
-        # coordinates in HR space
-        coor_hr = [torch.arange(0, round(h * scale), 1).unsqueeze(0).float().to(x.device),
-                   torch.arange(0, round(w * scale2), 1).unsqueeze(0).float().to(x.device)]
-
-        # coordinates in LR space ==> R(x), R(y)
-        coor_h = ((coor_hr[0] + 0.5) / scale) - (torch.floor((coor_hr[0] + 0.5) / scale + 1e-3)) - 0.5
-        coor_h = coor_h.permute(1, 0)
-        coor_w = ((coor_hr[1] + 0.5) / scale2) - (torch.floor((coor_hr[1] + 0.5) / scale2 + 1e-3)) - 0.5
-
-        input = torch.cat((
-            torch.ones_like(coor_h).expand([-1, round(scale2 * w)]).unsqueeze(0) / scale2,  # 1 x H x W
-            torch.ones_like(coor_h).expand([-1, round(scale2 * w)]).unsqueeze(0) / scale,
-            coor_h.expand([-1, round(scale2 * w)]).unsqueeze(0),                            # 1 x H x W
-            coor_w.expand([round(scale * h), -1]).unsqueeze(0)
-        ), 0).unsqueeze(0)
-        # ===================================================================================================
-
-        # (2) predict filters and offsets ==============================================
-        embedding = self.body(input)        # torch.Size([1, 64, 75, 75])
-        # offsets
-        offset = self.offset(embedding)     # torch.Size([1, 2, 75, 75])
-
-        # filters
-        routing_weights = self.routing(embedding)   # torch.Size([1, 4, H, W])
-        routing_weights = routing_weights.view(
-            self.num_experts, round(scale * h) * round(scale2 * w)).transpose(0, 1)  # (H*W) * n    torch.Size([5625, 4])
-
-        weight_compress = self.weight_compress.view(self.num_experts, -1)  # torch.Size([n=4, Cout=8, Cin=64, ks=1, ks=1]) --> torch.Size([4, 512])
-        weight_compress = torch.matmul(routing_weights, weight_compress)  # torch.Size([225, 512])
-        weight_compress = weight_compress.view(
-            1, round(scale * h), round(scale2 * w), self.channels // 8, self.channels)  # torch.Size([1, H, W, 8, 64])
-
-        weight_expand = self.weight_expand.view(self.num_experts, -1)
-        weight_expand = torch.matmul(routing_weights, weight_expand)
-        weight_expand = weight_expand.view(
-            1, round(scale * h), round(scale2 * w), self.channels, self.channels // 8)  # torch.Size([1, H, W, 64, 8])
-        # ===============================================================================
-
-        # (3) grid sample & spatially varying filtering ===================================
-        # grid sample
-        fea0 = grid_sample(x, offset, scale, scale2)  # b * h * w * c * 1
-        fea = fea0.unsqueeze(-1).permute(0, 2, 3, 1, 4)  # b * h * w * c * 1
-
-        # spatially varying filtering
-        out = torch.matmul(weight_compress.expand([b, -1, -1, -1, -1]), fea)
-        out = torch.matmul(weight_expand.expand([b, -1, -1, -1, -1]), out).squeeze(-1)
-        # =================================================================================
-
-        return out.permute(0, 3, 1, 2) + fea0
 
 
 @ARCH_REGISTRY.register()
@@ -142,9 +18,8 @@ class BasicVSR(nn.Module):
         spynet_path (str): Path to the pretrained weights of SPyNet. Default: None.
     """
 
-    def __init__(self, num_feat=64, num_block=30, spynet_path=None, scale=(4, 4)):
+    def __init__(self, num_feat=64, num_block=15, spynet_path=None):
         super().__init__()
-        self.scale = scale
         self.num_feat = num_feat
 
         # alignment
@@ -154,20 +29,14 @@ class BasicVSR(nn.Module):
         self.backward_trunk = ConvResidualBlocks(num_feat + 3, num_feat, num_block)
         self.forward_trunk = ConvResidualBlocks(num_feat + 3, num_feat, num_block)
 
-        self.scale = scale
-
         # reconstruction
         self.fusion = nn.Conv2d(num_feat * 2, num_feat, 1, 1, 0, bias=True)
-        # ---------------------------------------------------------------------
-        # self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1, bias=True)
-        # self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1, bias=True)
-        # ==>
-        self.upsample = SA_upsample(num_feat)
-        # self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
+        self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1, bias=True)
+        self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1, bias=True)
+        self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
         self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
-        # ---------------------------------------------------------------------
 
-        # self.pixel_shuffle = nn.PixelShuffle(2)
+        self.pixel_shuffle = nn.PixelShuffle(2)
 
         # activation functions
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
@@ -182,9 +51,6 @@ class BasicVSR(nn.Module):
         flows_forward = self.spynet(x_2, x_1).view(b, n - 1, 2, h, w)
 
         return flows_forward, flows_backward
-    
-    def set_scale(self, scale: Union[tuple, float, int]):
-        self.scale = scale
 
     def forward(self, x):
         """Forward function of BasicVSR.
@@ -219,17 +85,13 @@ class BasicVSR(nn.Module):
             feat_prop = self.forward_trunk(feat_prop)
 
             # upsample
-            out = torch.cat([out_l[i], feat_prop], dim=1)               # torch.Size([4, 128, 64, 64])
-            out = self.lrelu(self.fusion(out))                          # torch.Size([4, 64, 64, 64])
-            # ------------------------------------------------------------------------------------------
-            # out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))     # torch.Size([4, 64, 128, 128])
-            # out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))     # torch.Size([4, 64, 256, 256])
-            # ==>
-            out = self.upsample(out, self.scale[0], self.scale[1])
-            # out = self.lrelu(self.conv_hr(out))
+            out = torch.cat([out_l[i], feat_prop], dim=1)
+            out = self.lrelu(self.fusion(out))
+            out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))
+            out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))
+            out = self.lrelu(self.conv_hr(out))
             out = self.conv_last(out)
-            # ------------------------------------------------------------------------------------------
-            base = F.interpolate(x_i, size=(out.shape[-2], out.shape[-1]), mode='bilinear', align_corners=False)
+            base = F.interpolate(x_i, scale_factor=4, mode='bilinear', align_corners=False)
             out += base
             out_l[i] = out
 
@@ -255,7 +117,7 @@ class ConvResidualBlocks(nn.Module):
         return self.main(fea)
 
 
-# @ARCH_REGISTRY.register()
+@ARCH_REGISTRY.register()
 class IconVSR(nn.Module):
     """IconVSR, proposed also in the BasicVSR paper.
 
@@ -477,23 +339,154 @@ class EDVRFeatureExtractor(nn.Module):
 if __name__ == '__main__':
     from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
 
-    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = 'cpu'
+    # x = torch.randn(1, 3, 640, 360)
+    # x = torch.randn(1, 3, 427, 240)
+    x = torch.randn(1, 1, 3, 320, 180)
+    # x = torch.randn(1, 3, 256, 256)
 
-    num_frame = 7
-    
-    scale = (1.2, 1.2)
-    model = BasicVSR().to(device)
-    model.set_scale(scale)
-    model.eval()
+    model = BasicVSR(
+        num_feat=64,
+        num_block=30
+    )
 
+    # print(model)
     print(
-        "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
+        "Model have {:.3f}M parameters in total".format(
+            sum(x.numel() for x in model.parameters()) / 1000000.0))
+    print(f'params: {sum(map(lambda x: x.numel(), model.parameters()))}')
+    print(flop_count_table(FlopCountAnalysis(model, x), activations=ActivationCountAnalysis(model, x)))
 
-    input = torch.rand(1, num_frame, 3, 480, 585).to(device)
+    output = model(x)
+    print(output.shape)
 
-    with torch.no_grad():
-        # print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
-        out = model(input)
 
-    print(out.shape)
+"""
+Model have 6.291M parameters in total
+params: 6291311
+| module                                  | #parameters or shape   | #flops    | #activations   |
+|:----------------------------------------|:-----------------------|:----------|:---------------|
+| model                                   | 6.291M                 | 0.338T    | 0.589G         |
+|  spynet.basic_module                    |  1.44M                 |           |                |
+|   spynet.basic_module.0.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.0.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.0.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.0.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.0.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.0.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.1.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.1.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.1.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.1.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.1.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.1.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.2.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.2.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.2.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.2.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.2.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.2.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.3.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.3.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.3.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.3.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.3.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.3.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.4.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.4.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.4.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.4.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.4.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.4.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.5.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.5.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.5.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.5.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.5.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.5.basic_module.8 |    1.57K               |           |                |
+|  backward_trunk.main                    |  2.254M                |  0.13T    |  0.225G        |
+|   backward_trunk.main.0                 |   38.656K              |   2.223G  |   3.686M       |
+|    backward_trunk.main.0.weight         |    (64, 67, 3, 3)      |           |                |
+|    backward_trunk.main.0.bias           |    (64,)               |           |                |
+|   backward_trunk.main.2                 |   2.216M               |   0.127T  |   0.221G       |
+|    backward_trunk.main.2.0              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.1              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.2              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.3              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.4              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.5              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.6              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.7              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.8              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.9              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.10             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.11             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.12             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.13             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.14             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.15             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.16             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.17             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.18             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.19             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.20             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.21             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.22             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.23             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.24             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.25             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.26             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.27             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.28             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.29             |    73.856K             |    4.247G |    7.373M      |
+|  forward_trunk.main                     |  2.254M                |  0.13T    |  0.225G        |
+|   forward_trunk.main.0                  |   38.656K              |   2.223G  |   3.686M       |
+|    forward_trunk.main.0.weight          |    (64, 67, 3, 3)      |           |                |
+|    forward_trunk.main.0.bias            |    (64,)               |           |                |
+|   forward_trunk.main.2                  |   2.216M               |   0.127T  |   0.221G       |
+|    forward_trunk.main.2.0               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.1               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.2               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.3               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.4               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.5               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.6               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.7               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.8               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.9               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.10              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.11              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.12              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.13              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.14              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.15              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.16              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.17              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.18              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.19              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.20              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.21              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.22              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.23              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.24              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.25              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.26              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.27              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.28              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.29              |    73.856K             |    4.247G |    7.373M      |
+|  fusion                                 |  8.256K                |  0.472G   |  3.686M        |
+|   fusion.weight                         |   (64, 128, 1, 1)      |           |                |
+|   fusion.bias                           |   (64,)                |           |                |
+|  upconv1                                |  0.148M                |  8.493G   |  14.746M       |
+|   upconv1.weight                        |   (256, 64, 3, 3)      |           |                |
+|   upconv1.bias                          |   (256,)               |           |                |
+|  upconv2                                |  0.148M                |  33.974G  |  58.982M       |
+|   upconv2.weight                        |   (256, 64, 3, 3)      |           |                |
+|   upconv2.bias                          |   (256,)               |           |                |
+|  conv_hr                                |  36.928K               |  33.974G  |  58.982M       |
+|   conv_hr.weight                        |   (64, 64, 3, 3)       |           |                |
+|   conv_hr.bias                          |   (64,)                |           |                |
+|  conv_last                              |  1.731K                |  1.593G   |  2.765M        |
+|   conv_last.weight                      |   (3, 64, 3, 3)        |           |                |
+|   conv_last.bias                        |   (3,)                 |           |                |
+torch.Size([1, 1, 3, 1280, 720])
+"""

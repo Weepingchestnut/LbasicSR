@@ -448,3 +448,38 @@ class ResidualBlockNoBNDynamic(nn.Module):
         out = self.conv2(conv2_input)
         out = identity + out * self.res_scale
         return {'x': out, 'weights': inputs['weights']}
+
+
+# =========
+# for LIIF
+# =========
+
+def make_coord(shape, ranges=None, flatten=True):
+    """Make coordinates at grid centers.
+
+    Args:
+        shape (tuple): shape of image.
+        ranges (tuple): range of coordinate value. Default: None.
+        flatten (bool): flatten to (n, 2) or Not. Default: True.
+
+    Returns:
+        coord (Tensor): coordinates.
+    """
+    coord_seqs = []
+    for i, n in enumerate(shape):
+        if ranges is None:
+            v0, v1 = -1, 1
+        else:
+            v0, v1 = ranges[i]
+        r = (v1 - v0) / (2 * n)
+        seq = v0 + r + (2 * r) * torch.arange(n).float()
+        coord_seqs.append(seq)
+
+    if 'indexing' in torch.meshgrid.__code__.co_varnames:
+        coord = torch.meshgrid(*coord_seqs, indexing='ij')
+    else:
+        coord = torch.meshgrid(*coord_seqs)
+    coord = torch.stack(coord, dim=-1)      # [H, W, 2]
+    if flatten:
+        coord = coord.view(-1, coord.shape[-1])     # [H*W, 2]
+    return coord

@@ -69,8 +69,7 @@ def window_partition(x, window_size):
     B, D, H, W, C = x.shape
     x = x.view(B, D // window_size[0], window_size[0], H // window_size[1], window_size[1], W // window_size[2],
                window_size[2], C)
-    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, window_size[0] * window_size[1] * window_size[2],
-                                                                  C)
+    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, window_size[0] * window_size[1] * window_size[2], C)
     return windows
 
 
@@ -288,9 +287,7 @@ class SwinTransformerBlock(nn.Module):
             attn_windows = self.attn(x_windows, mask=None)
 
         # merge windows
-        attn_windows = attn_windows.view(-1, *(self.window_size + [
-            c,
-        ]))
+        attn_windows = attn_windows.view(-1, *(self.window_size + [c,]))
         shifted_x = window_reverse(attn_windows, self.window_size, b, Dp, Hp, Wp)  # B D' H' W' C
         # reverse cyclic shift
         if any(i > 0 for i in self.shift_size):
@@ -651,6 +648,7 @@ def compute_mask(t, x_size, window_size, shift_size, device):
     return attn_mask
 
 
+# @ARCH_REGISTRY.register()
 class SwinIRFM(nn.Module):
     r""" SwinIRFM
     Args:
@@ -837,7 +835,7 @@ class SwinIRFM(nn.Module):
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
-        attn_mask = compute_mask(self.num_frames,x_size,tuple(self.window_size),self.shift_size,x.device)
+        attn_mask = compute_mask(self.num_frames, x_size, tuple(self.window_size), self.shift_size, x.device)
         for layer in self.layers:
             x = layer(x.contiguous(), x_size , attn_mask)
 
@@ -857,14 +855,14 @@ class SwinIRFM(nn.Module):
                 x = x.view(-1, c, h, w)
                 x = self.conv_first(x)
                 #x = self.feature_extraction(x)
-                x = x.view(n, t, -1, h, w)
+                x = x.view(n, t, -1, h, w)      # torch.Size([1, 5, 96, 264, 264])
 
             if c == 64:
                 x = x.view(-1, c, h, w)
                 x = self.conv_first_feat(x)
                 x = x.view(n, t, -1, h, w)
 
-            x_center = x[:, t // 2, :, :, :].contiguous()
+            x_center = x[:, t // 2, :, :, :].contiguous()   # torch.Size([1, 96, 264, 264])
             feats = self.forward_features(x)
 
             x = self.conv_after_body(feats[:, t // 2, :, :, :]) + x_center
@@ -942,6 +940,10 @@ class PatchMerging(nn.Module):
 
 
 if __name__ == '__main__':
+    from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
     upscale = 4
     window_size = (2, 8, 8)
     height = (1024 // upscale // window_size[1] + 1) * window_size[1]
@@ -968,11 +970,18 @@ if __name__ == '__main__':
         upscale=2,
         img_range=1.,
         upsampler='pixelshuffle',
-    )
-
+    ).to(device)
+    model.eval()
+    
     print(model)
     # print(height, width, model.flops() / 1e9)
+    
+    print(
+        "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
 
-    x = torch.randn((1, 5, 3, height, width))
-    x = model(x)
-    print(x.shape)
+    input = torch.randn((1, 5, 3, height, width)).to(device)
+    # print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
+    
+    with torch.inference_mode():
+        out = model(input)
+    print(out.shape)

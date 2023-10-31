@@ -181,10 +181,10 @@ void deform_attn_cuda_backward(
     columns[1] = at::matmul(grad_output[b].transpose(2, 3), attns); // (attn_head x (height*width) x attn_dim x (clip_size*attn_size))
 
     // gradient w.r.t. attns_before_softmax
-//    // for PyTorch 1.9.1
-//    grad_attns = at::_softmax_backward_data(grad_attns, attns, -1, grad_attns); // todo: it seems pt191 has different interface as pt110
+    // for PyTorch 1.9.1
+    grad_attns = at::_softmax_backward_data(grad_attns, attns, -1, grad_attns); // todo: it seems pt191 has different interface as pt110
     // for PyTorch 1.10.1
-    grad_attns = at::_softmax_backward_data(grad_attns, attns, -1, dtype);
+    // grad_attns = at::_softmax_backward_data(grad_attns, attns, -1, dtype);
 
     // gradient w.r.t. q, (attn_head x (height*width) x 1 x (clip_size*attn_size)) @ (attn_head x (height*width) x (clip_size*attn_size) x attn_dim)
     grad_q[b] = at::matmul(grad_attns, columns[0].transpose(2, 3)) * attn_scale; // (attn_head x (height*width) x 1 x attn_dim)

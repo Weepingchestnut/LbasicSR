@@ -207,6 +207,17 @@ def train_pipeline(root_path):
             if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
                 logger.info('Saving models and training states.')
                 model.save(epoch, current_iter)
+            
+            # ------ for VRT/RVRT ------------------------------------------------------------------------
+            if opt.get('use_static_graph', False) and (current_iter == opt['train']['fix_iter'] - 1):
+                current_iter += 1
+                model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+                model.save(epoch, current_iter)
+                current_iter -= 1
+                logger.info('Saving models ahead of time when changing the computation graph with use_static_graph=True'
+                            ' (we need it due to a bug with use_checkpoint=True in distributed training). The training '
+                            'will be terminated by PyTorch in the next iteration. Just resume training with the same '
+                            '.yml config file.')
 
             # validation
             # 每隔一段时间，做validation

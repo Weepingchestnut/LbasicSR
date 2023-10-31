@@ -39,6 +39,8 @@ def test_pipeline(root_path):
         # test_scale = opt['scale']
         if 'downsampling_scale' in test_loader.dataset.opt.keys():
             test_scale = test_loader.dataset.opt['downsampling_scale']
+        elif 'val_scale' in test_loader.dataset.opt.keys():
+            test_scale = test_loader.dataset.opt['val_scale']
         else:
             test_scale = opt['scale']
         logger.info(f'Testing {test_set_name} x{test_scale}...')

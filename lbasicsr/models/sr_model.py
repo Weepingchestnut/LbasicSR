@@ -13,6 +13,7 @@ from lbasicsr.metrics import calculate_metric
 from lbasicsr.models.base_model import BaseModel
 from lbasicsr.utils import get_root_logger, tensor2img, imwrite
 from lbasicsr.utils.registry import MODEL_REGISTRY
+from .sam import SAM
 
 
 @MODEL_REGISTRY.register()  # 注册SRModel
@@ -106,8 +107,10 @@ class SRModel(BaseModel):
     # =========================================
     def feed_data(self, data):
         self.lq = data['lq'].to(self.device)
+        # print('self.lq shape:', self.lq.shape)
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
+        # for arbitrary-scale
         if 'scale' in data:
             self.scale = data['scale']
 
@@ -317,18 +320,47 @@ class SRModel(BaseModel):
     # 得到网络的输出结果。该函数会在 validation 中用到（实际可以简化掉）
     # ==================================================================
     def get_current_visuals(self):
-        print("\ngt: ({}, {})".format(self.gt.size(-2), self.gt.size(-1)))
+        logger = get_root_logger()
+        logger.info("gt: ({}, {})".format(self.gt.size(-2), self.gt.size(-1)))
+        logger.info("lq: ({}, {})".format(self.lq.size(-2), self.lq.size(-1)))
+        logger.info("output: ({}, {})".format(self.output.size(-2), self.output.size(-1)))
+
+        # arbitrary-scale BI post-processing
+        if self.output.ndim == 4 and self.output.shape != self.gt.shape:
+            logger.info('arbitrary-scale SR, use BI post-process ......')
+            self.output = T.Resize(size=(self.gt.size(-2), self.gt.size(-1)), interpolation=InterpolationMode.BICUBIC,
+                         antialias=True)(self.output)
+            # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
+        if self.output.ndim == 5 and self.output.shape != self.gt.shape:
+            # logger.info('BI resize ......')
+            logger.info('arbitrary-scale SR, use BI post-process ......')
+            b, t, c, h, w = self.output.size()
+            self.output = self.output.view(-1, c, h, w)
+            # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
+            self.output = T.Resize(size=(self.gt.size(-2), self.gt.size(-1)), interpolation=InterpolationMode.BICUBIC,
+                                   antialias=True)(self.output)
+            self.output = self.output.view(b, t, c, self.output.size(-2), self.output.size(-1))
+        out_dict = OrderedDict()
+        out_dict['lq'] = self.lq.detach().cpu()
+        out_dict['result'] = self.output.detach().cpu()
+        if hasattr(self, 'gt'):
+            out_dict['gt'] = self.gt.detach().cpu()
+        return out_dict
+    
+    def get_current_visuals_nologger(self):
+        print("gt: ({}, {})".format(self.gt.size(-2), self.gt.size(-1)))
         print("lq: ({}, {})".format(self.lq.size(-2), self.lq.size(-1)))
         print("output: ({}, {})".format(self.output.size(-2), self.output.size(-1)))
 
         # arbitrary-scale BI post-processing
         if self.output.ndim == 4 and self.output.shape != self.gt.shape:
-            print('BI resize ......')
+            print('arbitrary-scale SR, use BI post-process ......')
             self.output = T.Resize(size=(self.gt.size(-2), self.gt.size(-1)), interpolation=InterpolationMode.BICUBIC,
                          antialias=True)(self.output)
             # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
         if self.output.ndim == 5 and self.output.shape != self.gt.shape:
-            print('BI resize ......')
+            # logger.info('BI resize ......')
+            print('arbitrary-scale SR, use BI post-process ......')
             b, t, c, h, w = self.output.size()
             self.output = self.output.view(-1, c, h, w)
             # self.output = imresize(self.output, sizes=(self.gt.size(-2), self.gt.size(-1)))
@@ -351,3 +383,71 @@ class SRModel(BaseModel):
         else:
             self.save_network(self.net_g, 'net_g', current_iter)
         self.save_training_state(epoch, current_iter)
+
+
+@MODEL_REGISTRY.register()  # 注册SRModel
+class SRModel_SAM(SRModel):
+    """Base SR model for single image super-resolution."""
+
+    def __init__(self, opt):
+        super(SRModel_SAM, self).__init__(opt)
+        
+    def setup_optimizers(self):
+        train_opt = self.opt['train']
+        optim_params = []
+        for k, v in self.net_g.named_parameters():
+            if v.requires_grad:
+                optim_params.append(v)
+            else:
+                logger = get_root_logger()
+                logger.warning(f'Params {k} will not be optimized.')
+
+        optim_type = train_opt['optim_g'].pop('type')
+        # self.optimizer_g = self.get_optimizer(optim_type, optim_params, **train_opt['optim_g'])
+        # SGD
+        # base_optimizer = torch.optim.SGD
+        # self.optimizer_g = SAM(optim_params, base_optimizer, lr=train_opt['optim_g']['lr'], momentum=train_opt['optim_g']['momentum'])
+        # Adam
+        base_optimizer = torch.optim.Adam
+        self.optimizer_g = SAM(optim_params, base_optimizer, rho=0.05, adaptive=False, **train_opt['optim_g'])
+        self.optimizers.append(self.optimizer_g)
+    
+    def optimize_parameters(self, current_iter):
+        self.optimizer_g.zero_grad()    # 使得 optimizer 中的梯度归零
+        self.output = self.net_g(self.lq)   # network forward
+
+        # ===========================================================================
+        # loss 的计算
+        l_total = 0
+        loss_dict = OrderedDict()
+        # pixel loss
+        if self.cri_pix:
+            l_pix = self.cri_pix(self.output, self.gt)
+            l_total += l_pix
+            loss_dict['l_pix'] = l_pix
+        # perceptual loss
+        if self.cri_perceptual:
+            l_percep, l_style = self.cri_perceptual(self.output, self.gt)
+            if l_percep is not None:
+                l_total += l_percep
+                loss_dict['l_percep'] = l_percep
+            if l_style is not None:
+                l_total += l_style
+                loss_dict['l_style'] = l_style
+        # ===========================================================================
+
+        # ------ for SAM ---------------------------------------------- 
+        l_total.backward()
+        self.optimizer_g.first_step(zero_grad=True)
+        
+        # l_total.backward()
+        l_total1 = l_total.detach_().requires_grad_(True)
+        l_total1.backward()
+        self.optimizer_g.second_step(zero_grad=True)
+        # -------------------------------------------------------------
+
+        # 为了 loss 的显示，同时也同步多卡上的loss
+        self.log_dict = self.reduce_loss_dict(loss_dict)
+
+        if self.ema_decay > 0:
+            self.model_ema(decay=self.ema_decay)

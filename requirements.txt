@@ -16,4 +16,5 @@ tqdm
 wandb
 yapf
 timm>=0.6
+ninja
 

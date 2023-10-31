@@ -40,7 +40,8 @@ class EDSR(nn.Module):
 
         self.img_range = img_range
         self.mean = torch.Tensor(rgb_mean).view(1, 3, 1, 1)
-
+        self.num_feat = num_feat    # for LIIF
+        
         self.conv_first = nn.Conv2d(num_in_ch, num_feat, 3, 1, 1)
         self.body = make_layer(ResidualBlockNoBN, num_block, num_feat=num_feat, res_scale=res_scale, pytorch_init=True)
         self.conv_after_body = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
@@ -59,3 +60,19 @@ class EDSR(nn.Module):
         x = x / self.img_range + self.mean
 
         return x
+    
+    # # -------------------------------------------------
+    # # adjust forward for SAM
+    # def forward(self, x):
+    #     self.mean = self.mean.type_as(x)
+
+    #     x = (x - self.mean) * self.img_range
+    #     feat = self.conv_first(x)
+    #     res = self.conv_after_body(self.body(feat))
+    #     res = res + feat
+
+    #     out = self.conv_last(self.upsample(res))
+    #     out = out / self.img_range + self.mean
+
+    #     return out
+    # # -------------------------------------------------

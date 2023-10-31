@@ -1,9 +1,6 @@
-import math
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
-import torchvision.transforms as T
-from torchvision.transforms import InterpolationMode
 
 from lbasicsr.metrics.flops import get_flops
 from lbasicsr.utils.registry import ARCH_REGISTRY
@@ -14,8 +11,7 @@ class PCDAlignment(nn.Module):
     """Alignment module using Pyramid, Cascading and Deformable convolution
     (PCD). It is used in EDVR.
 
-    Ref:
-        EDVR: Video Restoration with Enhanced Deformable Convolutional Networks
+    ``Paper: EDVR: Video Restoration with Enhanced Deformable Convolutional Networks``
 
     Args:
         num_feat (int): Channel number of middle features. Default: 64.
@@ -150,11 +146,11 @@ class TSAFusion(nn.Module):
         Returns:
             Tensor: Features after TSA with the shape (b, c, h, w).
         """
-        b, t, c, h, w = aligned_feat.size()     # torch.Size([32, 5, 64, 64, 64])
+        b, t, c, h, w = aligned_feat.size()
         # temporal attention
-        embedding_ref = self.temporal_attn1(aligned_feat[:, self.center_frame_idx, :, :, :].clone())    # torch.Size([32, 64, 64, 64])
-        embedding = self.temporal_attn2(aligned_feat.view(-1, c, h, w))     # torch.Size([160, 64, 64, 64])
-        embedding = embedding.view(b, t, -1, h, w)  # (b, t, c, h, w) torch.Size([32, 5, 64, 64, 64])
+        embedding_ref = self.temporal_attn1(aligned_feat[:, self.center_frame_idx, :, :, :].clone())
+        embedding = self.temporal_attn2(aligned_feat.view(-1, c, h, w))
+        embedding = embedding.view(b, t, -1, h, w)  # (b, t, c, h, w)
 
         corr_l = []  # correlation list
         for i in range(t):
@@ -247,30 +243,13 @@ class PredeblurModule(nn.Module):
         return feat_l1
 
 
-class EDVRUpsample(nn.Sequential):
-    def __init__(self, scale, num_feat):
-        m = []
-        if (scale & (scale - 1)) == 0:
-            for _ in range(int(math.log(scale, 2))):
-                m.append(nn.Conv2d(num_feat, 4 * 64, 3, 1, 1, bias=True))
-                m.append(nn.PixelShuffle(2))
-                m.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
-        elif scale == 3:
-            m.append(nn.Conv2d(num_feat, 9 * 64, 3, 1, 1, bias=True))
-            m.append(nn.PixelShuffle(3))
-            m.append(nn.LeakyReLU(negative_slope=0.1, inplace=True))
-        else:
-            raise ValueError(f'scale {scale} is not supported. Supported scales: 2^n and 3.')
-        super(EDVRUpsample, self).__init__(*m)
-
-
 @ARCH_REGISTRY.register()
 class EDVR(nn.Module):
     """EDVR network structure for video super-resolution.
 
     Now only support X4 upsampling factor.
-    Paper:
-        EDVR: Video Restoration with Enhanced Deformable Convolutional Networks
+
+    ``Paper: EDVR: Video Restoration with Enhanced Deformable Convolutional Networks``
 
     Args:
         num_in_ch (int): Channel number of input image. Default: 3.
@@ -301,8 +280,7 @@ class EDVR(nn.Module):
                  center_frame_idx=None,
                  hr_in=False,
                  with_predeblur=False,
-                 with_tsa=True,
-                 scale=4):
+                 with_tsa=True):
         super(EDVR, self).__init__()
         if center_frame_idx is None:
             self.center_frame_idx = num_frame // 2
@@ -311,7 +289,6 @@ class EDVR(nn.Module):
         self.hr_in = hr_in
         self.with_predeblur = with_predeblur
         self.with_tsa = with_tsa
-        self.scale = scale
 
         # extract features for each frame
         if self.with_predeblur:
@@ -337,12 +314,9 @@ class EDVR(nn.Module):
         # reconstruction
         self.reconstruction = make_layer(ResidualBlockNoBN, num_reconstruct_block, num_feat=num_feat)
         # upsample
-        # -----------------------------------------------------------------------
-        # self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1)
-        # self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1)
-        # self.pixel_shuffle = nn.PixelShuffle(2)
-        self.upsample = EDVRUpsample(scale, num_feat)
-        # -----------------------------------------------------------------------
+        self.upconv1 = nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1)
+        self.upconv2 = nn.Conv2d(num_feat, 64 * 4, 3, 1, 1)
+        self.pixel_shuffle = nn.PixelShuffle(2)
         self.conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
         self.conv_last = nn.Conv2d(64, 3, 3, 1, 1)
 
@@ -358,13 +332,13 @@ class EDVR(nn.Module):
             assert h % 16 == 0 and w % 16 == 0, ('The height and width must be multiple of 16.')
         else:
             # assert h % 4 == 0 and w % 4 == 0, ('The height and width must be multiple of 4.')
+            # ------ for arbitrary-scale VSR ----------------------------------
             if w % 4 != 0:
                 pad_w = int(w // 4 + 1) * 4 - w
                 x = F.pad(x, (0, pad_w), mode='constant', value=0)
             if h % 4 != 0:
                 pad_h = int(h // 4 + 1) * 4 - h
                 x = F.pad(x, (0, 0, 0, pad_h), mode='constant', value=0)
-
         b, t, c, h, w = x.size()
 
         # extract features for each frame
@@ -390,8 +364,7 @@ class EDVR(nn.Module):
 
         # PCD alignment
         ref_feat_l = [  # reference feature list
-            feat_l1[:, self.center_frame_idx, :, :, :].clone(),
-            feat_l2[:, self.center_frame_idx, :, :, :].clone(),
+            feat_l1[:, self.center_frame_idx, :, :, :].clone(), feat_l2[:, self.center_frame_idx, :, :, :].clone(),
             feat_l3[:, self.center_frame_idx, :, :, :].clone()
         ]
         aligned_feat = []
@@ -405,39 +378,287 @@ class EDVR(nn.Module):
         if not self.with_tsa:
             aligned_feat = aligned_feat.view(b, -1, h, w)
         feat = self.fusion(aligned_feat)
+        # ------ for arbitrary-scale VSR ----------------------------------
         feat = feat[..., 0:origin_h, 0:origin_w]
 
         out = self.reconstruction(feat)
-        # -----------------------------------------------------------------
-        # out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))
-        # out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))
-        out = self.upsample(out)
-        # -----------------------------------------------------------------
+        out = self.lrelu(self.pixel_shuffle(self.upconv1(out)))
+        out = self.lrelu(self.pixel_shuffle(self.upconv2(out)))
         out = self.lrelu(self.conv_hr(out))
         out = self.conv_last(out)
         if self.hr_in:
             base = x_center
         else:
-            base = F.interpolate(x_center, scale_factor=self.scale, mode='bilinear', align_corners=False)
+            base = F.interpolate(x_center, scale_factor=4, mode='bilinear', align_corners=False)
         out += base
         return out
 
 
 if __name__ == '__main__':
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+    
+    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cpu'
+    
     # EDVR-M -----------------
     # net = EDVR().to(device)
     # EDVR-L -----------------
-    net = EDVR(num_feat=128, num_reconstruct_block=40, scale=2).to(device)
-    net.eval()
+    model = EDVR(num_feat=128, num_reconstruct_block=40).to(device)
+    model.eval()
 
-    # print(
-    #     "EDVR have {:.3f}M parameters in total".format(sum(x.numel() for x in net.parameters()) / 1000000.0))
+    print(
+        "EDVR have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
 
-    input = torch.rand(1, 5, 3, 64, 64).to(device)
-    # get_flops(net, [5, 3, 180, 320])
+    x = torch.rand(1, 5, 3, 180, 320).to(device)
 
     with torch.no_grad():
-        out = net(input)
+        print(flop_count_table(FlopCountAnalysis(model, x), activations=ActivationCountAnalysis(model, x)))
+        out = model(x)
 
     print(out.shape)
+
+
+"""
+EDVR_x4 official, add padding to solve PCD downsample mismatch
+
+EDVR have 20.634M parameters in total
+| module                               | #parameters or shape   | #flops     | #activations   |
+|:-------------------------------------|:-----------------------|:-----------|:---------------|
+| model                                | 20.634M                | 2.018T     | 1.664G         |
+|  conv_first                          |  3.584K                |  0.995G    |  36.864M       |
+|   conv_first.weight                  |   (128, 3, 3, 3)       |            |                |
+|   conv_first.bias                    |   (128,)               |            |                |
+|  feature_extraction                  |  1.476M                |  0.425T    |  0.369G        |
+|   feature_extraction.0               |   0.295M               |   84.935G  |   73.728M      |
+|    feature_extraction.0.conv1        |    0.148M              |    42.467G |    36.864M     |
+|    feature_extraction.0.conv2        |    0.148M              |    42.467G |    36.864M     |
+|   feature_extraction.1               |   0.295M               |   84.935G  |   73.728M      |
+|    feature_extraction.1.conv1        |    0.148M              |    42.467G |    36.864M     |
+|    feature_extraction.1.conv2        |    0.148M              |    42.467G |    36.864M     |
+|   feature_extraction.2               |   0.295M               |   84.935G  |   73.728M      |
+|    feature_extraction.2.conv1        |    0.148M              |    42.467G |    36.864M     |
+|    feature_extraction.2.conv2        |    0.148M              |    42.467G |    36.864M     |
+|   feature_extraction.3               |   0.295M               |   84.935G  |   73.728M      |
+|    feature_extraction.3.conv1        |    0.148M              |    42.467G |    36.864M     |
+|    feature_extraction.3.conv2        |    0.148M              |    42.467G |    36.864M     |
+|   feature_extraction.4               |   0.295M               |   84.935G  |   73.728M      |
+|    feature_extraction.4.conv1        |    0.148M              |    42.467G |    36.864M     |
+|    feature_extraction.4.conv2        |    0.148M              |    42.467G |    36.864M     |
+|  conv_l2_1                           |  0.148M                |  10.617G   |  9.216M        |
+|   conv_l2_1.weight                   |   (128, 128, 3, 3)     |            |                |
+|   conv_l2_1.bias                     |   (128,)               |            |                |
+|  conv_l2_2                           |  0.148M                |  10.617G   |  9.216M        |
+|   conv_l2_2.weight                   |   (128, 128, 3, 3)     |            |                |
+|   conv_l2_2.bias                     |   (128,)               |            |                |
+|  conv_l3_1                           |  0.148M                |  2.654G    |  2.304M        |
+|   conv_l3_1.weight                   |   (128, 128, 3, 3)     |            |                |
+|   conv_l3_1.bias                     |   (128,)               |            |                |
+|  conv_l3_2                           |  0.148M                |  2.654G    |  2.304M        |
+|   conv_l3_2.weight                   |   (128, 128, 3, 3)     |            |                |
+|   conv_l3_2.bias                     |   (128,)               |            |                |
+|  pcd_align                           |  4.537M                |  0.673T    |  0.407G        |
+|   pcd_align.offset_conv1             |   0.885M               |   0.111T   |   48.384M      |
+|    pcd_align.offset_conv1.l3         |    0.295M              |    5.308G  |    2.304M      |
+|    pcd_align.offset_conv1.l2         |    0.295M              |    21.234G |    9.216M      |
+|    pcd_align.offset_conv1.l1         |    0.295M              |    84.935G |    36.864M     |
+|   pcd_align.offset_conv2             |   0.738M               |   0.109T   |   48.384M      |
+|    pcd_align.offset_conv2.l3         |    0.148M              |    2.654G  |    2.304M      |
+|    pcd_align.offset_conv2.l2         |    0.295M              |    21.234G |    9.216M      |
+|    pcd_align.offset_conv2.l1         |    0.295M              |    84.935G |    36.864M     |
+|   pcd_align.offset_conv3             |   0.295M               |   53.084G  |   46.08M       |
+|    pcd_align.offset_conv3.l2         |    0.148M              |    10.617G |    9.216M      |
+|    pcd_align.offset_conv3.l1         |    0.148M              |    42.467G |    36.864M     |
+|   pcd_align.dcn_pack                 |   1.19M                |   94.058G  |   81.648M      |
+|    pcd_align.dcn_pack.l3             |    0.397M              |    4.479G  |    3.888M      |
+|    pcd_align.dcn_pack.l2             |    0.397M              |    17.916G |    15.552M     |
+|    pcd_align.dcn_pack.l1             |    0.397M              |    71.664G |    62.208M     |
+|   pcd_align.feat_conv                |   0.59M                |   0.106T   |   46.08M       |
+|    pcd_align.feat_conv.l2            |    0.295M              |    21.234G |    9.216M      |
+|    pcd_align.feat_conv.l1            |    0.295M              |    84.935G |    36.864M     |
+|   pcd_align.cas_offset_conv1         |   0.295M               |   84.935G  |   36.864M      |
+|    pcd_align.cas_offset_conv1.weight |    (128, 256, 3, 3)    |            |                |
+|    pcd_align.cas_offset_conv1.bias   |    (128,)              |            |                |
+|   pcd_align.cas_offset_conv2         |   0.148M               |   42.467G  |   36.864M      |
+|    pcd_align.cas_offset_conv2.weight |    (128, 128, 3, 3)    |            |                |
+|    pcd_align.cas_offset_conv2.bias   |    (128,)              |            |                |
+|   pcd_align.cas_dcnpack              |   0.397M               |   71.664G  |   62.208M      |
+|    pcd_align.cas_dcnpack.weight      |    (128, 128, 3, 3)    |            |                |
+|    pcd_align.cas_dcnpack.bias        |    (128,)              |            |                |
+|    pcd_align.cas_dcnpack.conv_offset |    0.249M              |    71.664G |    62.208M     |
+|   pcd_align.upsample                 |                        |   0.369G   |   0            |
+|  fusion                              |  1.296M                |  75.475G   |  89.395M       |
+|   fusion.temporal_attn1              |   0.148M               |   8.493G   |   7.373M       |
+|    fusion.temporal_attn1.weight      |    (128, 128, 3, 3)    |            |                |
+|    fusion.temporal_attn1.bias        |    (128,)              |            |                |
+|   fusion.temporal_attn2              |   0.148M               |   42.467G  |   36.864M      |
+|    fusion.temporal_attn2.weight      |    (128, 128, 3, 3)    |            |                |
+|    fusion.temporal_attn2.bias        |    (128,)              |            |                |
+|   fusion.feat_fusion                 |   82.048K              |   4.719G   |   7.373M       |
+|    fusion.feat_fusion.weight         |    (128, 640, 1, 1)    |            |                |
+|    fusion.feat_fusion.bias           |    (128,)              |            |                |
+|   fusion.spatial_attn1               |   82.048K              |   4.719G   |   7.373M       |
+|    fusion.spatial_attn1.weight       |    (128, 640, 1, 1)    |            |                |
+|    fusion.spatial_attn1.bias         |    (128,)              |            |                |
+|   fusion.spatial_attn2               |   32.896K              |   0.472G   |   1.843M       |
+|    fusion.spatial_attn2.weight       |    (128, 256, 1, 1)    |            |                |
+|    fusion.spatial_attn2.bias         |    (128,)              |            |                |
+|   fusion.spatial_attn3               |   0.148M               |   2.123G   |   1.843M       |
+|    fusion.spatial_attn3.weight       |    (128, 128, 3, 3)    |            |                |
+|    fusion.spatial_attn3.bias         |    (128,)              |            |                |
+|   fusion.spatial_attn4               |   16.512K              |   0.236G   |   1.843M       |
+|    fusion.spatial_attn4.weight       |    (128, 128, 1, 1)    |            |                |
+|    fusion.spatial_attn4.bias         |    (128,)              |            |                |
+|   fusion.spatial_attn5               |   0.148M               |   8.493G   |   7.373M       |
+|    fusion.spatial_attn5.weight       |    (128, 128, 3, 3)    |            |                |
+|    fusion.spatial_attn5.bias         |    (128,)              |            |                |
+|   fusion.spatial_attn_l1             |   16.512K              |   0.236G   |   1.843M       |
+|    fusion.spatial_attn_l1.weight     |    (128, 128, 1, 1)    |            |                |
+|    fusion.spatial_attn_l1.bias       |    (128,)              |            |                |
+|   fusion.spatial_attn_l2             |   0.295M               |   1.062G   |   0.461M       |
+|    fusion.spatial_attn_l2.weight     |    (128, 256, 3, 3)    |            |                |
+|    fusion.spatial_attn_l2.bias       |    (128,)              |            |                |
+|   fusion.spatial_attn_l3             |   0.148M               |   0.531G   |   0.461M       |
+|    fusion.spatial_attn_l3.weight     |    (128, 128, 3, 3)    |            |                |
+|    fusion.spatial_attn_l3.bias       |    (128,)              |            |                |
+|   fusion.spatial_attn_add1           |   16.512K              |   0.944G   |   7.373M       |
+|    fusion.spatial_attn_add1.weight   |    (128, 128, 1, 1)    |            |                |
+|    fusion.spatial_attn_add1.bias     |    (128,)              |            |                |
+|   fusion.spatial_attn_add2           |   16.512K              |   0.944G   |   7.373M       |
+|    fusion.spatial_attn_add2.weight   |    (128, 128, 1, 1)    |            |                |
+|    fusion.spatial_attn_add2.bias     |    (128,)              |            |                |
+|   fusion.upsample                    |                        |   36.864M  |   0            |
+|  reconstruction                      |  11.807M               |  0.679T    |  0.59G         |
+|   reconstruction.0                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.0.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.0.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.1                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.1.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.1.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.2                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.2.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.2.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.3                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.3.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.3.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.4                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.4.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.4.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.5                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.5.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.5.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.6                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.6.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.6.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.7                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.7.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.7.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.8                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.8.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.8.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.9                   |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.9.conv1            |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.9.conv2            |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.10                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.10.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.10.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.11                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.11.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.11.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.12                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.12.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.12.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.13                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.13.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.13.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.14                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.14.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.14.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.15                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.15.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.15.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.16                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.16.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.16.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.17                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.17.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.17.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.18                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.18.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.18.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.19                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.19.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.19.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.20                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.20.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.20.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.21                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.21.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.21.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.22                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.22.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.22.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.23                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.23.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.23.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.24                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.24.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.24.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.25                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.25.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.25.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.26                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.26.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.26.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.27                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.27.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.27.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.28                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.28.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.28.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.29                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.29.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.29.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.30                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.30.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.30.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.31                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.31.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.31.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.32                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.32.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.32.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.33                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.33.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.33.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.34                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.34.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.34.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.35                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.35.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.35.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.36                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.36.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.36.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.37                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.37.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.37.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.38                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.38.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.38.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|   reconstruction.39                  |   0.295M               |   16.987G  |   14.746M      |
+|    reconstruction.39.conv1           |    0.148M              |    8.493G  |    7.373M      |
+|    reconstruction.39.conv2           |    0.148M              |    8.493G  |    7.373M      |
+|  upconv1                             |  0.59M                 |  33.974G   |  29.491M       |
+|   upconv1.weight                     |   (512, 128, 3, 3)     |            |                |
+|   upconv1.bias                       |   (512,)               |            |                |
+|  upconv2                             |  0.295M                |  67.948G   |  58.982M       |
+|   upconv2.weight                     |   (256, 128, 3, 3)     |            |                |
+|   upconv2.bias                       |   (256,)               |            |                |
+|  conv_hr                             |  36.928K               |  33.974G   |  58.982M       |
+|   conv_hr.weight                     |   (64, 64, 3, 3)       |            |                |
+|   conv_hr.bias                       |   (64,)                |            |                |
+|  conv_last                           |  1.731K                |  1.593G    |  2.765M        |
+|   conv_last.weight                   |   (3, 64, 3, 3)        |            |                |
+|   conv_last.bias                     |   (3,)                 |            |                |
+torch.Size([1, 3, 720, 1280])
+"""

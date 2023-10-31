@@ -3,12 +3,12 @@ from torch import nn as nn
 from torch.nn import functional as F
 
 from lbasicsr.utils.registry import ARCH_REGISTRY
-from .arch_util import ResidualBlockNoBN, flow_warp, make_layer
-from .edvr_arch import PCDAlignment, TSAFusion
-from .spynet_arch import SpyNet
+from lbasicsr.archs.arch_util import ResidualBlockNoBN, flow_warp, make_layer
+from lbasicsr.archs.edvr_arch import PCDAlignment, TSAFusion
+from lbasicsr.archs.spynet_arch import SpyNet
 
 
-@ARCH_REGISTRY.register()
+# @ARCH_REGISTRY.register()
 class BasicVSR(nn.Module):
     """A recurrent network for video SR. Now only x4 is supported.
 
@@ -117,7 +117,7 @@ class ConvResidualBlocks(nn.Module):
         return self.main(fea)
 
 
-@ARCH_REGISTRY.register()
+# @ARCH_REGISTRY.register()
 class IconVSR(nn.Module):
     """IconVSR, proposed also in the BasicVSR paper.
 
@@ -334,3 +334,159 @@ class EDVRFeatureExtractor(nn.Module):
 
         # TSA fusion
         return self.fusion(aligned_feat)
+
+
+if __name__ == '__main__':
+    from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+
+    # x = torch.randn(1, 3, 640, 360)
+    # x = torch.randn(1, 3, 427, 240)
+    x = torch.randn(1, 1, 3, 320, 180)
+    # x = torch.randn(1, 3, 256, 256)
+
+    model = BasicVSR(
+        num_feat=64,
+        num_block=30
+    )
+
+    # print(model)
+    print(
+        "Model have {:.3f}M parameters in total".format(
+            sum(x.numel() for x in model.parameters()) / 1000000.0))
+    print(f'params: {sum(map(lambda x: x.numel(), model.parameters()))}')
+    print(flop_count_table(FlopCountAnalysis(model, x), activations=ActivationCountAnalysis(model, x)))
+
+    output = model(x)
+    print(output.shape)
+
+
+"""
+Model have 6.291M parameters in total
+params: 6291311
+| module                                  | #parameters or shape   | #flops    | #activations   |
+|:----------------------------------------|:-----------------------|:----------|:---------------|
+| model                                   | 6.291M                 | 0.338T    | 0.589G         |
+|  spynet.basic_module                    |  1.44M                 |           |                |
+|   spynet.basic_module.0.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.0.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.0.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.0.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.0.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.0.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.1.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.1.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.1.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.1.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.1.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.1.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.2.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.2.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.2.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.2.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.2.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.2.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.3.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.3.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.3.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.3.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.3.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.3.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.4.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.4.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.4.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.4.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.4.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.4.basic_module.8 |    1.57K               |           |                |
+|   spynet.basic_module.5.basic_module    |   0.24M                |           |                |
+|    spynet.basic_module.5.basic_module.0 |    12.576K             |           |                |
+|    spynet.basic_module.5.basic_module.2 |    0.1M                |           |                |
+|    spynet.basic_module.5.basic_module.4 |    0.1M                |           |                |
+|    spynet.basic_module.5.basic_module.6 |    25.104K             |           |                |
+|    spynet.basic_module.5.basic_module.8 |    1.57K               |           |                |
+|  backward_trunk.main                    |  2.254M                |  0.13T    |  0.225G        |
+|   backward_trunk.main.0                 |   38.656K              |   2.223G  |   3.686M       |
+|    backward_trunk.main.0.weight         |    (64, 67, 3, 3)      |           |                |
+|    backward_trunk.main.0.bias           |    (64,)               |           |                |
+|   backward_trunk.main.2                 |   2.216M               |   0.127T  |   0.221G       |
+|    backward_trunk.main.2.0              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.1              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.2              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.3              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.4              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.5              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.6              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.7              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.8              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.9              |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.10             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.11             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.12             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.13             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.14             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.15             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.16             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.17             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.18             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.19             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.20             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.21             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.22             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.23             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.24             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.25             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.26             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.27             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.28             |    73.856K             |    4.247G |    7.373M      |
+|    backward_trunk.main.2.29             |    73.856K             |    4.247G |    7.373M      |
+|  forward_trunk.main                     |  2.254M                |  0.13T    |  0.225G        |
+|   forward_trunk.main.0                  |   38.656K              |   2.223G  |   3.686M       |
+|    forward_trunk.main.0.weight          |    (64, 67, 3, 3)      |           |                |
+|    forward_trunk.main.0.bias            |    (64,)               |           |                |
+|   forward_trunk.main.2                  |   2.216M               |   0.127T  |   0.221G       |
+|    forward_trunk.main.2.0               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.1               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.2               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.3               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.4               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.5               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.6               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.7               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.8               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.9               |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.10              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.11              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.12              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.13              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.14              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.15              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.16              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.17              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.18              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.19              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.20              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.21              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.22              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.23              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.24              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.25              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.26              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.27              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.28              |    73.856K             |    4.247G |    7.373M      |
+|    forward_trunk.main.2.29              |    73.856K             |    4.247G |    7.373M      |
+|  fusion                                 |  8.256K                |  0.472G   |  3.686M        |
+|   fusion.weight                         |   (64, 128, 1, 1)      |           |                |
+|   fusion.bias                           |   (64,)                |           |                |
+|  upconv1                                |  0.148M                |  8.493G   |  14.746M       |
+|   upconv1.weight                        |   (256, 64, 3, 3)      |           |                |
+|   upconv1.bias                          |   (256,)               |           |                |
+|  upconv2                                |  0.148M                |  33.974G  |  58.982M       |
+|   upconv2.weight                        |   (256, 64, 3, 3)      |           |                |
+|   upconv2.bias                          |   (256,)               |           |                |
+|  conv_hr                                |  36.928K               |  33.974G  |  58.982M       |
+|   conv_hr.weight                        |   (64, 64, 3, 3)       |           |                |
+|   conv_hr.bias                          |   (64,)                |           |                |
+|  conv_last                              |  1.731K                |  1.593G   |  2.765M        |
+|   conv_last.weight                      |   (3, 64, 3, 3)        |           |                |
+|   conv_last.bias                        |   (3,)                 |           |                |
+torch.Size([1, 1, 3, 1280, 720])
+"""

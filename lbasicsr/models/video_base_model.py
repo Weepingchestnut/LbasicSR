@@ -17,6 +17,8 @@ class VideoBaseModel(SRModel):
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img):
         dataset = dataloader.dataset
+        if dataset.opt.get('downsampling_scale', 0) != 0:
+            self.opt['scale'] = dataset.opt['downsampling_scale']
         dataset_name = dataset.opt['name']
         with_metrics = self.opt['val']['metrics'] is not None
         # initialize self.metric_results
@@ -53,7 +55,10 @@ class VideoBaseModel(SRModel):
 
             self.feed_data(val_data)
             self.test()
-            visuals = self.get_current_visuals()
+            if frame_idx == '0':
+                visuals = self.get_current_visuals()
+            else:
+                visuals = self.get_current_visuals_nologger()
             result_img = tensor2img([visuals['result']])
             metric_data['img'] = result_img
             if 'gt' in visuals:

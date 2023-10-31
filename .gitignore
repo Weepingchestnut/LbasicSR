@@ -40,9 +40,11 @@ tests/*
 
 mytest/*
 
+# ASVSR
 lbasicsr/archs/ablation
 lbasicsr/archs/stan
 lbasicsr/archs/asvsr*
+lbasicsr/models/asvsr*
 
 lbasicsr/data/psnr_log
 lbasicsr/data/gen_lr_log
@@ -56,3 +58,5 @@ run_bash.sh
 run_test.py
 nohup.out
 train_ovsr.sh
+work_dir/
+.vscode/

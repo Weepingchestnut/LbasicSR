@@ -15,5 +15,7 @@ fi
 # python -m torch.distributed.launch --nproc_per_node=$GPUS --master_port=$PORT \
 #     lbasicsr/train.py -opt $CONFIG --launcher pytorch ${@:3}
 
+# debug
+# torchrun --nproc_per_node=$GPUS --master_port=$PORT lbasicsr/train.py -opt $CONFIG --debug --launcher pytorch
 
 torchrun --nproc_per_node=$GPUS --master_port=$PORT lbasicsr/train.py -opt $CONFIG --launcher pytorch

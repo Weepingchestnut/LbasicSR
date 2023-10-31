@@ -212,15 +212,17 @@ class ASREDSDataset(REDSDataset):
 
     def __init__(self, opt):
         super(ASREDSDataset, self).__init__(opt)
+        
+        if isinstance(self.opt['scale'], tuple):
+            self.opt['scale'] = self.opt['scale']
+        else:
+            self.opt['scale'] = (self.opt['scale'], self.opt['scale'])
 
         self.epoch = 0
-        self.init_int_scale = opt['init_int_scale']
-        self.single_scale_ft = opt['single_scale_ft']
-        self.CL_train_set = opt['CL_train_set']
-        if opt.__contains__('only_sy_scale'):
-            self.only_sy_scale = opt['only_sy_scale']
-        else:
-            self.only_sy_scale = False
+        self.init_int_scale = opt.get('init_int_scale', False)
+        self.single_scale_ft = opt.get('single_scale_ft', False)
+        self.CL_train_set = opt.get('CL_train_set', None)
+        self.only_sy_scale = opt.get('only_sy_scale', False)
 
         if self.only_sy_scale:
             self.scale_h_list = [
@@ -522,3 +524,193 @@ class REDSRecurrentDataset(data.Dataset):
 
     def __len__(self):
         return len(self.keys)
+
+
+@DATASET_REGISTRY.register()
+class ASREDSRecurrentDataset(REDSRecurrentDataset):
+
+    def __init__(self, opt):
+        super(ASREDSRecurrentDataset, self).__init__(opt)
+        # arbitrary-scale setting
+        self.epoch = 0
+        self.init_int_scale = opt.get('init_int_scale', False)
+        self.single_scale_ft = opt.get('single_scale_ft', False)
+        self.CL_train_set = opt.get('CL_train_set', None)
+        self.only_sy_scale = opt.get('only_sy_scale', False)
+        self.max_scale = opt.get('max_scale', 4)
+        
+        if self.only_sy_scale:
+            self.scale_h_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+            ]
+
+            self.scale_w_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+            ]
+        else:
+            self.scale_h_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+                1.5, 1.5, 1.5, 1.5, 1.5,
+                2.0, 2.0, 2.0, 2.0, 2.0,
+                2.5, 2.5, 2.5, 2.5, 2.5,
+                3.0, 3.0, 3.0, 3.0, 3.0,
+                3.5, 3.5, 3.5, 3.5, 3.5,
+                4.0, 4.0, 4.0, 4.0, 4.0,
+                # 6.0, 7.0, 7.5, 8.0
+            ]
+
+            self.scale_w_list = [
+                1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
+                2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
+                3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0,
+                2.0, 2.5, 3.0, 3.5, 4.0,
+                1.5, 2.5, 3.0, 3.5, 4.0,
+                1.5, 2.0, 3.0, 3.5, 4.0,
+                1.5, 2.0, 2.5, 3.5, 4.0,
+                1.5, 2.0, 2.5, 3.0, 4.0,
+                1.5, 2.0, 2.5, 3.0, 3.5,
+                # 6.0, 7.0, 7.5, 8.0
+            ]
+        
+        if opt.__contains__('scale_h_list') and opt.__contains__('scale_w_list'):
+            self.scale_h_list = opt['scale_h_list']
+            self.scale_w_list = opt['scale_w_list']
+        
+
+    def __getitem__(self, index):
+        if self.file_client is None:
+            self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
+
+        # scale = self.opt['scale']
+        # gt_size = self.opt['gt_size']
+        key = self.keys[index]
+        clip_name, frame_name = key.split('/')  # key example: 000/00000000
+
+        # determine the neighboring frames
+        interval = random.choice(self.interval_list)
+
+        # ensure not exceeding the borders
+        start_frame_idx = int(frame_name)
+        if start_frame_idx > 100 - self.num_frame * interval:
+            start_frame_idx = random.randint(0, 100 - self.num_frame * interval)
+        end_frame_idx = start_frame_idx + self.num_frame * interval
+
+        neighbor_list = list(range(start_frame_idx, end_frame_idx, interval))
+
+        # random reverse
+        if self.random_reverse and random.random() < 0.5:
+            neighbor_list.reverse()
+
+        # get the neighboring LQ and GT frames
+        # img_lqs = []
+        img_gts = []
+        for neighbor in neighbor_list:
+            if self.is_lmdb:
+                # img_lq_path = f'{clip_name}/{neighbor:08d}'
+                img_gt_path = f'{clip_name}/{neighbor:08d}'
+            else:
+                # img_lq_path = self.lq_root / clip_name / f'{neighbor:08d}.png'
+                img_gt_path = self.gt_root / clip_name / f'{neighbor:08d}.png'
+
+            # get LQ
+            # img_bytes = self.file_client.get(img_lq_path, 'lq')
+            # img_lq = imfrombytes(img_bytes, float32=True)
+            # img_lqs.append(img_lq)
+
+            # get GT
+            img_bytes = self.file_client.get(img_gt_path, 'gt')
+            img_gt = imfrombytes(img_bytes, float32=True)
+            img_gts.append(img_gt)
+
+        # randomly crop
+        # img_gts, img_lqs = paired_random_crop(img_gts, img_lqs, gt_size, scale, img_gt_path)
+        img_gts = single_random_crop(img_gts, 
+                                     gt_patch_size=(self.opt['lq_size'] * self.max_scale, self.opt['lq_size'] * self.max_scale))
+
+        # augmentation - flip, rotate
+        # img_lqs.extend(img_gts)
+        # img_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
+        img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
+
+        # img_results = img2tensor(img_results)
+        # img_gts = torch.stack(img_results[len(img_lqs) // 2:], dim=0)
+        # img_lqs = torch.stack(img_results[:len(img_lqs) // 2], dim=0)
+        img_gts = img2tensor(img_gts)
+        img_gts = torch.stack(img_gts, dim=0)
+
+        # img_lqs: (t, c, h, w)
+        # img_gts: (t, c, h, w)
+        # key: str
+        return {'gt': img_gts, 'key': key}
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
+    def cl_train_stg(self):
+        if self.epoch >= self.CL_train_set[0]:
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+            return scale_h, scale_w
+        if self.epoch % 10 <= self.CL_train_set[1]:
+            scale_h, scale_w = 4, 4
+        elif self.CL_train_set[1] < self.epoch % 10 <= self.CL_train_set[2]:
+            scale_h = random.randint(2, 4)
+            scale_w = scale_h
+        elif self.epoch % 10 > self.CL_train_set[2]:
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+
+        return scale_h, scale_w
+
+    def as_collate_fn(self, batch):
+        out_batch = {}
+        elem = batch[0]
+        for key in elem.keys():
+            if key == 'gt':
+                gts_list = [d[key] for d in batch]
+                elem_cur = gts_list[0]
+                out = None
+                if torch.utils.data.get_worker_info() is not None:
+                    # If we're in a background process, concatenate directly into a
+                    # shared memory tensor to avoid an extra copy
+                    numel = sum([x.numel() for x in gts_list])
+                    storage = elem_cur.storage()._new_shared(numel)
+                    out = elem_cur.new(storage)
+                out_batch[key] = torch.stack(gts_list, 0, out=out)  # GT: B x T x C x H x W
+            elif key == 'key':
+                key_list = [d[key] for d in batch]
+                out_batch[key] = key_list
+
+        # get arbitrary scale --------------------------------------------------
+        if self.CL_train_set is not None:
+            scale_h, scale_w = self.cl_train_stg()
+        elif self.single_scale_ft:
+            scale_h = self.opt['scale'][0]
+            scale_w = self.opt['scale'][1]
+        elif self.epoch == 0 and self.init_int_scale:
+            scale_h = random.randint(2, 4)
+            scale_w = scale_h
+        else:
+            idx_scale = random.randrange(0, len(self.scale_h_list))
+            scale_h = self.scale_h_list[idx_scale]
+            scale_w = self.scale_w_list[idx_scale]
+        lq_size = self.opt['lq_size']
+        gt_size = (round(lq_size * scale_h), round(lq_size * scale_w))
+        # ----------------------------------------------------------------------
+        b, t, c, h, w = out_batch['gt'].size()
+        out_batch['gt'] = single_random_crop(out_batch['gt'].view(-1, c, h, w), gt_size)
+        out_batch['lq'] = arbitrary_scale_downsample(out_batch['gt'], (scale_h, scale_w), self.opt['downsample_mode'])
+        out_batch['gt'] = out_batch['gt'].view(b, t, c, gt_size[0], gt_size[1])
+        out_batch['lq'] = out_batch['lq'].view(b, t, c, lq_size, lq_size)
+        # out_batch['scale'] = torch.tensor(scale)
+        out_batch['scale'] = (scale_h, scale_w)
+
+        return out_batch

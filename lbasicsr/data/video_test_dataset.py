@@ -53,6 +53,12 @@ class VideoTestDataset(data.Dataset):
         self.file_client = None
         self.io_backend_opt = opt['io_backend']
         assert self.io_backend_opt['type'] != 'lmdb', 'No need to use lmdb during validation/test.'
+        
+        # ------ for arbitrary scale VSR ------------------------------
+        as_down = False
+        if 'use_arbitrary_scale_downsampling' in opt:
+            as_down = True
+            self.scale = opt['downsampling_scale']
 
         logger = get_root_logger()
         logger.info(f'Generate data info for VideoTestDataset - {opt["name"]}')
@@ -66,7 +72,7 @@ class VideoTestDataset(data.Dataset):
             subfolders_lq = sorted(glob.glob(osp.join(self.lq_root, '*')))
             subfolders_gt = sorted(glob.glob(osp.join(self.gt_root, '*')))
 
-        if opt['name'].lower().split('_')[0] in ['vid4', 'reds4', 'redsofficial', 'udm10']:
+        if opt['name'].lower().split('_')[0] in ['vid4', 'reds4', 'redsofficial', 'udm10']:     # e.g. vid4_x4, vid4_x3
             for subfolder_lq, subfolder_gt in zip(subfolders_lq, subfolders_gt):    # 循环读取每个视频序列：calendar,city,
                 # get frame list for lq and gt
                 subfolder_name = osp.basename(subfolder_lq)
@@ -91,17 +97,19 @@ class VideoTestDataset(data.Dataset):
                 # cache data or save the frame list
                 if self.cache_data:
                     logger.info(f'Cache {subfolder_name} for VideoTestDataset...')
-                    # self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
-                    # self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt)
+                    if as_down:
+                        # ------ for arbitrary-scale need as_mod_crop -----------------------------------------
+                        self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq, 
+                                                                    require_as_mod_crop=True, scale=self.scale)
+                        self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt, 
+                                                                    require_as_mod_crop=True, scale=self.scale)
+                    else:
+                        self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
+                        self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt)
                     # # for x3 scale ---------------------------------------------------------------------------------
                     # self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
                     # self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt,
                     #                                             require_mod_crop=True, scale=self.opt['scale'])
-                    # for arbitrary-scale need as_mod_crop -----------------------------------------------------------
-                    self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq,
-                                                                require_as_mod_crop=True, scale=self.opt['downsampling_scale'])
-                    self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt,
-                                                                require_as_mod_crop=True, scale=self.opt['downsampling_scale'])
                 else:
                     self.imgs_lq[subfolder_name] = img_paths_lq
                     self.imgs_gt[subfolder_name] = img_paths_gt
@@ -284,7 +292,7 @@ class ASVideoTestDataset(VideoTestDataset):
         super(ASVideoTestDataset, self).__init__(opt)
 
         if 'downsampling_scale' in self.opt.keys():
-            self.opt['scale'] = self.opt['downsampling_scale']
+            self.opt['scale'] = self.opt['downsampling_scale']      # the same with VideoTestDataset's self.scale
 
     def __getitem__(self, index):
         folder = self.data_info['folder'][index]
@@ -317,6 +325,55 @@ class ASVideoTestDataset(VideoTestDataset):
             'border': border,  # 1 for border, 0 for non-border
             'lq_path': lq_path  # center frame
         }
+
+
+@DATASET_REGISTRY.register()
+class ASVideoTestVimeo90KDataset(VideoTestVimeo90KDataset):
+    """Video test dataset for Vimeo90k-Test dataset.
+
+    It only keeps the center frame for testing.
+    For testing datasets, there is no need to prepare LMDB files.
+
+    Args:
+        opt (dict): Config for train dataset. It contains the following keys:
+            dataroot_gt (str): Data root path for gt.
+            dataroot_lq (str): Data root path for lq.
+            io_backend (dict): IO backend type and other kwarg.
+            cache_data (bool): Whether to cache testing datasets.
+            name (str): Dataset name.
+            meta_info_file (str): The path to the file storing the list of test
+                folders. If not provided, all the folders in the dataroot will
+                be used.
+            num_frame (int): Window size for input frames.
+            padding (str): Padding mode.
+    """
+
+    def __init__(self, opt):
+        super(ASVideoTestVimeo90KDataset, self).__init__(opt)
+        
+        if 'use_arbitrary_scale_downsampling' in opt:
+            self.scale = opt['downsampling_scale']
+
+    def __getitem__(self, index):
+        lq_path = self.data_info['lq_path'][index]
+        gt_path = self.data_info['gt_path'][index]
+        imgs_lq = read_img_seq(lq_path, require_as_mod_crop=True, scale=self.scale)
+        imgs_lq = arbitrary_scale_downsample(imgs_lq, scale=self.scale, mode=self.opt['downsampling_mode'])
+        img_gt = read_img_seq([gt_path], require_as_mod_crop=True, scale=self.scale)
+        img_gt.squeeze_(0)
+
+        return {
+            'lq': imgs_lq,  # (t, c, h, w)
+            'gt': img_gt,  # (c, h, w)
+            'folder': self.data_info['folder'][index],  # folder name
+            'idx': self.data_info['idx'][index],  # e.g., 0/843
+            'border': self.data_info['border'][index],  # 0 for non-border
+            'lq_path': lq_path[self.opt['num_frame'] // 2],  # center frame
+            'scale': self.scale
+        }
+
+    def __len__(self):
+        return len(self.data_info['gt_path'])
 
 
 @DATASET_REGISTRY.register()
@@ -380,7 +437,9 @@ class ASVideoRecurrentTestDataset(ASVideoTestDataset):
             imgs_gt = self.imgs_gt[folder]      # torch.Size([41, 3, 576, 720])
             imgs_lq = arbitrary_scale_downsample(imgs_gt, scale=self.opt['scale'])
         else:
-            raise NotImplementedError('Without cache_data is not implemented.')
+            # raise NotImplementedError('Without cache_data is not implemented.')
+            imgs_gt = read_img_seq(self.imgs_gt[folder], require_as_mod_crop=True, scale=self.scale)
+            imgs_lq = arbitrary_scale_downsample(imgs_gt, scale=self.opt['scale'])
 
         return {
             'lq': imgs_lq,
