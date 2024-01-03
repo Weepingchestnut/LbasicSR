@@ -3,6 +3,7 @@ from torch import nn as nn
 from torch.nn import functional as F
 
 from lbasicsr.metrics.flops import get_flops
+from lbasicsr.metrics.runtime import VSR_runtime_test
 from lbasicsr.utils.registry import ARCH_REGISTRY
 from lbasicsr.archs.arch_util import DCNv2Pack, ResidualBlockNoBN, make_layer
 
@@ -243,7 +244,7 @@ class PredeblurModule(nn.Module):
         return feat_l1
 
 
-@ARCH_REGISTRY.register()
+# @ARCH_REGISTRY.register()
 class EDVR(nn.Module):
     """EDVR network structure for video super-resolution.
 
@@ -396,108 +397,160 @@ class EDVR(nn.Module):
 
 if __name__ == '__main__':
     from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+    from torch.profiler import profile, record_function, ProfilerActivity
     
-    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = 'cpu'
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # device = 'cpu'
     
     # EDVR-M -----------------
     # net = EDVR().to(device)
     # EDVR-L -----------------
-    model = EDVR(num_feat=128, num_reconstruct_block=40).to(device)
+    scale = (4, 4)
+    model = EDVR(
+        num_feat=128, 
+        num_frame=7, 
+        num_reconstruct_block=40
+    ).to(device)
     model.eval()
+    
+    input = torch.rand(1, 7, 3, 180, 320).to(device)
+    
+    # ------ torch profile -------------------------
+    with profile(
+        activities=[
+            ProfilerActivity.CPU,
+            ProfilerActivity.CUDA,], 
+        record_shapes=True,
+        profile_memory=True,
+        # use_cuda=True
+    ) as prof:
+        with record_function("model_inference"):
+            for _ in range(input.shape[1]):
+                out = model(input)
+    
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    
+    
+    # ------ Runtime ----------------------
+    VSR_runtime_test(model, input, scale)
 
+    # ------ Parameter --------------------
     print(
-        "EDVR have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
+        "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
 
-    x = torch.rand(1, 5, 3, 180, 320).to(device)
-
+    # ------ FLOPs ------------------------
     with torch.no_grad():
-        print(flop_count_table(FlopCountAnalysis(model, x), activations=ActivationCountAnalysis(model, x)))
-        out = model(x)
-
-    print(out.shape)
+        print('Input:', input.shape)
+        print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
+        out = model(input)
+        print('Output:', out.shape)
 
 
 """
-EDVR_x4 official, add padding to solve PCD downsample mismatch
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                        model_inference         5.37%     140.068ms        98.03%        2.557s        2.557s       0.000us         0.00%        1.636s        1.636s         476 b         460 b      10.53 Gb    -112.40 Gb             1  
+                                           aten::conv2d         0.24%       6.327ms        45.36%        1.183s     754.457us       0.000us         0.00%     980.546ms     625.348us           0 b           0 b      52.58 Gb           0 b          1568  
+                                      aten::convolution         0.28%       7.330ms        45.11%        1.177s     750.422us       0.000us         0.00%     980.546ms     625.348us           0 b           0 b      52.58 Gb           0 b          1568  
+                                     aten::_convolution         0.78%      20.405ms        44.83%        1.169s     745.747us       0.000us         0.00%     980.546ms     625.348us           0 b           0 b      52.58 Gb           0 b          1568  
+                                aten::cudnn_convolution         7.51%     195.913ms        42.63%        1.112s     709.071us     812.658ms        49.66%     812.658ms     518.277us           0 b           0 b      52.58 Gb      -2.24 Gb          1568  
+sm80_xmma_fprop_implicit_gemm_tf32f32_tf32f32_f32_nh...         0.00%       0.000us         0.00%       0.000us       0.000us     576.642ms        35.24%     576.642ms     416.048us           0 b           0 b           0 b           0 b          1386  
+                             torchvision::deform_conv2d         0.92%      24.035ms         3.44%      89.621ms     457.250us     172.938ms        10.57%     301.212ms       1.537ms           0 b           0 b       3.13 Gb     -34.33 Gb           196  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us     178.286ms        10.90%     178.286ms     101.069us           0 b           0 b           0 b           0 b          1764  
+void cudnn::ops::nchwToNhwcKernel<float, float, floa...         0.00%       0.000us         0.00%       0.000us       0.000us     178.162ms        10.89%     178.162ms      58.645us           0 b           0 b           0 b           0 b          3038  
+void vision::ops::(anonymous namespace)::deformable_...         0.00%       0.000us         0.00%       0.000us       0.000us     172.938ms        10.57%     172.938ms     882.337us           0 b           0 b           0 b           0 b           196  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 2.608s
+Self CUDA time total: 1.636s
 
-EDVR have 20.634M parameters in total
+Warm up ...
+
+Testing ...
+
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████| 300/300 [01:12<00:00,  4.14it/s]
+
+Average Runtime: 240.708 ms
+
+Model have 20.699M parameters in total
+Input: torch.Size([1, 7, 3, 180, 320])
 | module                               | #parameters or shape   | #flops     | #activations   |
 |:-------------------------------------|:-----------------------|:-----------|:---------------|
-| model                                | 20.634M                | 2.018T     | 1.664G         |
-|  conv_first                          |  3.584K                |  0.995G    |  36.864M       |
+| model                                | 20.699M                | 2.489T     | 2.013G         |
+|  conv_first                          |  3.584K                |  1.393G    |  51.61M        |
 |   conv_first.weight                  |   (128, 3, 3, 3)       |            |                |
 |   conv_first.bias                    |   (128,)               |            |                |
-|  feature_extraction                  |  1.476M                |  0.425T    |  0.369G        |
-|   feature_extraction.0               |   0.295M               |   84.935G  |   73.728M      |
-|    feature_extraction.0.conv1        |    0.148M              |    42.467G |    36.864M     |
-|    feature_extraction.0.conv2        |    0.148M              |    42.467G |    36.864M     |
-|   feature_extraction.1               |   0.295M               |   84.935G  |   73.728M      |
-|    feature_extraction.1.conv1        |    0.148M              |    42.467G |    36.864M     |
-|    feature_extraction.1.conv2        |    0.148M              |    42.467G |    36.864M     |
-|   feature_extraction.2               |   0.295M               |   84.935G  |   73.728M      |
-|    feature_extraction.2.conv1        |    0.148M              |    42.467G |    36.864M     |
-|    feature_extraction.2.conv2        |    0.148M              |    42.467G |    36.864M     |
-|   feature_extraction.3               |   0.295M               |   84.935G  |   73.728M      |
-|    feature_extraction.3.conv1        |    0.148M              |    42.467G |    36.864M     |
-|    feature_extraction.3.conv2        |    0.148M              |    42.467G |    36.864M     |
-|   feature_extraction.4               |   0.295M               |   84.935G  |   73.728M      |
-|    feature_extraction.4.conv1        |    0.148M              |    42.467G |    36.864M     |
-|    feature_extraction.4.conv2        |    0.148M              |    42.467G |    36.864M     |
-|  conv_l2_1                           |  0.148M                |  10.617G   |  9.216M        |
+|  feature_extraction                  |  1.476M                |  0.595T    |  0.516G        |
+|   feature_extraction.0               |   0.295M               |   0.119T   |   0.103G       |
+|    feature_extraction.0.conv1        |    0.148M              |    59.454G |    51.61M      |
+|    feature_extraction.0.conv2        |    0.148M              |    59.454G |    51.61M      |
+|   feature_extraction.1               |   0.295M               |   0.119T   |   0.103G       |
+|    feature_extraction.1.conv1        |    0.148M              |    59.454G |    51.61M      |
+|    feature_extraction.1.conv2        |    0.148M              |    59.454G |    51.61M      |
+|   feature_extraction.2               |   0.295M               |   0.119T   |   0.103G       |
+|    feature_extraction.2.conv1        |    0.148M              |    59.454G |    51.61M      |
+|    feature_extraction.2.conv2        |    0.148M              |    59.454G |    51.61M      |
+|   feature_extraction.3               |   0.295M               |   0.119T   |   0.103G       |
+|    feature_extraction.3.conv1        |    0.148M              |    59.454G |    51.61M      |
+|    feature_extraction.3.conv2        |    0.148M              |    59.454G |    51.61M      |
+|   feature_extraction.4               |   0.295M               |   0.119T   |   0.103G       |
+|    feature_extraction.4.conv1        |    0.148M              |    59.454G |    51.61M      |
+|    feature_extraction.4.conv2        |    0.148M              |    59.454G |    51.61M      |
+|  conv_l2_1                           |  0.148M                |  14.864G   |  12.902M       |
 |   conv_l2_1.weight                   |   (128, 128, 3, 3)     |            |                |
 |   conv_l2_1.bias                     |   (128,)               |            |                |
-|  conv_l2_2                           |  0.148M                |  10.617G   |  9.216M        |
+|  conv_l2_2                           |  0.148M                |  14.864G   |  12.902M       |
 |   conv_l2_2.weight                   |   (128, 128, 3, 3)     |            |                |
 |   conv_l2_2.bias                     |   (128,)               |            |                |
-|  conv_l3_1                           |  0.148M                |  2.654G    |  2.304M        |
+|  conv_l3_1                           |  0.148M                |  3.716G    |  3.226M        |
 |   conv_l3_1.weight                   |   (128, 128, 3, 3)     |            |                |
 |   conv_l3_1.bias                     |   (128,)               |            |                |
-|  conv_l3_2                           |  0.148M                |  2.654G    |  2.304M        |
+|  conv_l3_2                           |  0.148M                |  3.716G    |  3.226M        |
 |   conv_l3_2.weight                   |   (128, 128, 3, 3)     |            |                |
 |   conv_l3_2.bias                     |   (128,)               |            |                |
-|  pcd_align                           |  4.537M                |  0.673T    |  0.407G        |
-|   pcd_align.offset_conv1             |   0.885M               |   0.111T   |   48.384M      |
-|    pcd_align.offset_conv1.l3         |    0.295M              |    5.308G  |    2.304M      |
-|    pcd_align.offset_conv1.l2         |    0.295M              |    21.234G |    9.216M      |
-|    pcd_align.offset_conv1.l1         |    0.295M              |    84.935G |    36.864M     |
-|   pcd_align.offset_conv2             |   0.738M               |   0.109T   |   48.384M      |
-|    pcd_align.offset_conv2.l3         |    0.148M              |    2.654G  |    2.304M      |
-|    pcd_align.offset_conv2.l2         |    0.295M              |    21.234G |    9.216M      |
-|    pcd_align.offset_conv2.l1         |    0.295M              |    84.935G |    36.864M     |
-|   pcd_align.offset_conv3             |   0.295M               |   53.084G  |   46.08M       |
-|    pcd_align.offset_conv3.l2         |    0.148M              |    10.617G |    9.216M      |
-|    pcd_align.offset_conv3.l1         |    0.148M              |    42.467G |    36.864M     |
-|   pcd_align.dcn_pack                 |   1.19M                |   94.058G  |   81.648M      |
-|    pcd_align.dcn_pack.l3             |    0.397M              |    4.479G  |    3.888M      |
-|    pcd_align.dcn_pack.l2             |    0.397M              |    17.916G |    15.552M     |
-|    pcd_align.dcn_pack.l1             |    0.397M              |    71.664G |    62.208M     |
-|   pcd_align.feat_conv                |   0.59M                |   0.106T   |   46.08M       |
-|    pcd_align.feat_conv.l2            |    0.295M              |    21.234G |    9.216M      |
-|    pcd_align.feat_conv.l1            |    0.295M              |    84.935G |    36.864M     |
-|   pcd_align.cas_offset_conv1         |   0.295M               |   84.935G  |   36.864M      |
+|  pcd_align                           |  4.537M                |  0.942T    |  0.569G        |
+|   pcd_align.offset_conv1             |   0.885M               |   0.156T   |   67.738M      |
+|    pcd_align.offset_conv1.l3         |    0.295M              |    7.432G  |    3.226M      |
+|    pcd_align.offset_conv1.l2         |    0.295M              |    29.727G |    12.902M     |
+|    pcd_align.offset_conv1.l1         |    0.295M              |    0.119T  |    51.61M      |
+|   pcd_align.offset_conv2             |   0.738M               |   0.152T   |   67.738M      |
+|    pcd_align.offset_conv2.l3         |    0.148M              |    3.716G  |    3.226M      |
+|    pcd_align.offset_conv2.l2         |    0.295M              |    29.727G |    12.902M     |
+|    pcd_align.offset_conv2.l1         |    0.295M              |    0.119T  |    51.61M      |
+|   pcd_align.offset_conv3             |   0.295M               |   74.318G  |   64.512M      |
+|    pcd_align.offset_conv3.l2         |    0.148M              |    14.864G |    12.902M     |
+|    pcd_align.offset_conv3.l1         |    0.148M              |    59.454G |    51.61M      |
+|   pcd_align.dcn_pack                 |   1.19M                |   0.132T   |   0.114G       |
+|    pcd_align.dcn_pack.l3             |    0.397M              |    6.271G  |    5.443M      |
+|    pcd_align.dcn_pack.l2             |    0.397M              |    25.082G |    21.773M     |
+|    pcd_align.dcn_pack.l1             |    0.397M              |    0.1T    |    87.091M     |
+|   pcd_align.feat_conv                |   0.59M                |   0.149T   |   64.512M      |
+|    pcd_align.feat_conv.l2            |    0.295M              |    29.727G |    12.902M     |
+|    pcd_align.feat_conv.l1            |    0.295M              |    0.119T  |    51.61M      |
+|   pcd_align.cas_offset_conv1         |   0.295M               |   0.119T   |   51.61M       |
 |    pcd_align.cas_offset_conv1.weight |    (128, 256, 3, 3)    |            |                |
 |    pcd_align.cas_offset_conv1.bias   |    (128,)              |            |                |
-|   pcd_align.cas_offset_conv2         |   0.148M               |   42.467G  |   36.864M      |
+|   pcd_align.cas_offset_conv2         |   0.148M               |   59.454G  |   51.61M       |
 |    pcd_align.cas_offset_conv2.weight |    (128, 128, 3, 3)    |            |                |
 |    pcd_align.cas_offset_conv2.bias   |    (128,)              |            |                |
-|   pcd_align.cas_dcnpack              |   0.397M               |   71.664G  |   62.208M      |
+|   pcd_align.cas_dcnpack              |   0.397M               |   0.1T     |   87.091M      |
 |    pcd_align.cas_dcnpack.weight      |    (128, 128, 3, 3)    |            |                |
 |    pcd_align.cas_dcnpack.bias        |    (128,)              |            |                |
-|    pcd_align.cas_dcnpack.conv_offset |    0.249M              |    71.664G |    62.208M     |
-|   pcd_align.upsample                 |                        |   0.369G   |   0            |
-|  fusion                              |  1.296M                |  75.475G   |  89.395M       |
+|    pcd_align.cas_dcnpack.conv_offset |    0.249M              |    0.1T    |    87.091M     |
+|   pcd_align.upsample                 |                        |   0.516G   |   0            |
+|  fusion                              |  1.362M                |  96.237G   |  0.104G        |
 |   fusion.temporal_attn1              |   0.148M               |   8.493G   |   7.373M       |
 |    fusion.temporal_attn1.weight      |    (128, 128, 3, 3)    |            |                |
 |    fusion.temporal_attn1.bias        |    (128,)              |            |                |
-|   fusion.temporal_attn2              |   0.148M               |   42.467G  |   36.864M      |
+|   fusion.temporal_attn2              |   0.148M               |   59.454G  |   51.61M       |
 |    fusion.temporal_attn2.weight      |    (128, 128, 3, 3)    |            |                |
 |    fusion.temporal_attn2.bias        |    (128,)              |            |                |
-|   fusion.feat_fusion                 |   82.048K              |   4.719G   |   7.373M       |
-|    fusion.feat_fusion.weight         |    (128, 640, 1, 1)    |            |                |
+|   fusion.feat_fusion                 |   0.115M               |   6.606G   |   7.373M       |
+|    fusion.feat_fusion.weight         |    (128, 896, 1, 1)    |            |                |
 |    fusion.feat_fusion.bias           |    (128,)              |            |                |
-|   fusion.spatial_attn1               |   82.048K              |   4.719G   |   7.373M       |
-|    fusion.spatial_attn1.weight       |    (128, 640, 1, 1)    |            |                |
+|   fusion.spatial_attn1               |   0.115M               |   6.606G   |   7.373M       |
+|    fusion.spatial_attn1.weight       |    (128, 896, 1, 1)    |            |                |
 |    fusion.spatial_attn1.bias         |    (128,)              |            |                |
 |   fusion.spatial_attn2               |   32.896K              |   0.472G   |   1.843M       |
 |    fusion.spatial_attn2.weight       |    (128, 256, 1, 1)    |            |                |
@@ -660,5 +713,5 @@ EDVR have 20.634M parameters in total
 |  conv_last                           |  1.731K                |  1.593G    |  2.765M        |
 |   conv_last.weight                   |   (3, 64, 3, 3)        |            |                |
 |   conv_last.bias                     |   (3,)                 |            |                |
-torch.Size([1, 3, 720, 1280])
+Output: torch.Size([1, 3, 720, 1280])
 """

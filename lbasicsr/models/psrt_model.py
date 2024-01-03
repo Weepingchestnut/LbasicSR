@@ -1,6 +1,6 @@
 import torch
 from collections import OrderedDict
-from torch.cuda.amp import autocast
+from torch.cuda.amp import autocast, GradScaler
 from torch.nn.parallel import DataParallel, DistributedDataParallel
 
 from lbasicsr.archs import build_network
@@ -34,6 +34,9 @@ class RecurrentMixPrecisionRTModel(VideoRecurrentModel):
         if self.is_train:
             self.init_training_settings()
             self.fix_flow_iter = opt['train'].get('fix_flow')
+            
+            # Mixed Precision Training
+            self.scaler = GradScaler()
 
     # add use_static_graph
     def model_to_device(self, net):
@@ -100,7 +103,8 @@ class RecurrentMixPrecisionRTModel(VideoRecurrentModel):
         self.net_g = self.model_to_device(self.net_g)
         self.optimizers.append(self.optimizer_g)
 
-    def optimize_parameters(self, scaler, current_iter):
+    # def optimize_parameters(self, scaler, current_iter):
+    def optimize_parameters(self, current_iter):
 
         if self.fix_flow_iter:
             logger = get_root_logger()
@@ -118,6 +122,7 @@ class RecurrentMixPrecisionRTModel(VideoRecurrentModel):
 
         with autocast():
             self.output = self.net_g(self.lq)
+            # print('self.output.shape:', self.output.shape)
             l_total = 0
             loss_dict = OrderedDict()
             # pixel loss
@@ -134,9 +139,13 @@ class RecurrentMixPrecisionRTModel(VideoRecurrentModel):
                 if l_style is not None:
                     l_total += l_style
                     loss_dict['l_style'] = l_style
-            scaler.scale(l_total).backward()
-            scaler.step(self.optimizer_g)
-            scaler.update()
+            # scaler.scale(l_total).backward()
+            # scaler.step(self.optimizer_g)
+            # scaler.update()
+            
+            self.scaler.scale(l_total).backward()
+            self.scaler.step(self.optimizer_g)
+            self.scaler.update()
 
             # l_total.backward()
             # self.optimizer_g.step()

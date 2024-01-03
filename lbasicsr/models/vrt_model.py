@@ -244,7 +244,11 @@ class VRTModel(VideoBaseModel):
 
         if num_frame_testing:
             # test as multiple clips if out-of-memory
-            sf = self.opt['scale']
+            # sf = self.opt['scale']
+            if isinstance(self.opt['scale'], tuple):
+                sf = self.opt['scale'][0]
+            else:
+                sf = self.opt['scale']
             num_frame_overlapping = self.opt['val'].get('num_frame_overlapping', 2)
             not_overlap_border = False
             b, d, c, h, w = lq.size()

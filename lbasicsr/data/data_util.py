@@ -562,14 +562,14 @@ def quick_test():
     videoinr = False
 
     # set sr and gt root path ---------------------------------------------------------------------------
-    sr_root_ = '/data/lzk/workspace/lmmsr/work_dirs/basicvsr-pp_c64n7_4xb2-300k_vimeo90k-bi/Vid4'
+    sr_root_ = '/data/lzk/workspace/lte/work_dir/swinir-liif/Vid4'
     gt_root = '/data/lzk/workspace/LbasicSR/datasets/Vid4/GT'
     # ---------------------------------------------------------------------------------------------------
 
     # set scale ------------
-    scales = [1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
-              2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0,
-              3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0]
+    scales = [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2,
+              2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
+              3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
     # scales = [(1.5, 4), (2, 4), (1.5, 3.5), (1.6, 3.05), (3.5, 2), (3.5, 1.75), (4, 1.4)]
     # scales = [2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3,
     #           3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4]
@@ -872,8 +872,8 @@ if __name__ == '__main__':
 
     # ======================
     # downsample_img()
-    downsample_video(data_root='/data/lzk/workspace/LbasicSR/datasets/UDM10', gt_dir='GT', degradation='BI')
-    # quick_test()
+    # downsample_video(data_root='/data/lzk/workspace/LbasicSR/datasets/UDM10', gt_dir='GT', degradation='BI')
+    quick_test()
     # quick_test_isr(args)
     # ======================
 

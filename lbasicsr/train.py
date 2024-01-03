@@ -166,10 +166,15 @@ def train_pipeline(root_path):
     # 虽然以 epoch 为外层循环，但实际是以 iteration 来判断训练是否结束
     for epoch in range(start_epoch, total_epochs + 1):
         train_sampler.set_epoch(epoch)
-        # ==============================
+        # -------------------------------------------------------------------------
+        # for some training strategy, it need epoch to set different learning rate
         if hasattr(train_loader.dataset, 'epoch'):
             train_loader.dataset.set_epoch(epoch)
-        # ==============================
+        # for VideoINR two-stage training
+        if hasattr(train_loader.dataset, 'as_down_sample'):
+            if current_iter == opt['train']['stage_division']:
+                train_loader.dataset.set_as_mode(current_iter)
+        # ------------------------------------------------------
         prefetcher.reset()
         train_data = prefetcher.next()
 
@@ -184,9 +189,8 @@ def train_pipeline(root_path):
             # update learning rate
             model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
             # training
-            # 喂数据
             model.feed_data(train_data)
-            # 一次训练过程 train step
+            # a train step, e.g. 1 batch iter
             model.optimize_parameters(current_iter)
             iter_timer.record()
             if current_iter == 1:
@@ -218,6 +222,7 @@ def train_pipeline(root_path):
                             ' (we need it due to a bug with use_checkpoint=True in distributed training). The training '
                             'will be terminated by PyTorch in the next iteration. Just resume training with the same '
                             '.yml config file.')
+            # --------------------------------------------------------------------------------------------
 
             # validation
             # 每隔一段时间，做validation

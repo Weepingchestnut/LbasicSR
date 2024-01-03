@@ -1,8 +1,13 @@
 addict
-cupy
+# cupy-cuda11x
+easydict
+einops
 future
+fvcore
 lmdb
+mc.py>=3.1
 numpy>=1.17
+ninja
 opencv-python
 Pillow
 pyyaml
@@ -12,9 +17,7 @@ scipy
 tb-nightly
 torch>=1.9
 torchvision
+timm>=0.6
 tqdm
 wandb
 yapf
-timm>=0.6
-ninja
-

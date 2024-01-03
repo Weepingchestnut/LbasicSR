@@ -18,68 +18,27 @@ from lbasicsr.utils.registry import DATASET_REGISTRY
 
 @DATASET_REGISTRY.register()
 class Adobe240Dataset(data.Dataset):
-    """Vimeo90K dataset for training.
-
-    The keys are generated from a meta info txt file.
-    basicsr/data/meta_info/meta_info_Vimeo90K_train_GT.txt
-
-    Each line contains the following items, separated by a white space.
-
-    1. clip name;
-    2. frame number;
-    3. image shape
-
-    Examples:
-
-    ::
-        00001/0001 7 (256,448,3)
-        00001/0002 7 (256,448,3)
-
-    - Key examples: "00001/0001"
-    - GT (gt): Ground-Truth;
-    - LQ (lq): Low-Quality, e.g., low-resolution/blurry/noisy/compressed frames.
-
-    The neighboring frame list for different num_frame:
-
-    ::
-
-        num_frame | frame list
-                1 | 4
-                3 | 3,4,5
-                5 | 2,3,4,5,6
-                7 | 1,2,3,4,5,6,7
-
-    Args:
-        opt (dict): Config for train dataset. It contains the following keys:
-        dataroot_gt (str): Data root path for gt.
-        dataroot_lq (str): Data root path for lq.
-        meta_info_file (str): Path for meta information file.
-        io_backend (dict): IO backend type and other kwarg.
-        num_frame (int): Window size for input frames.
-        gt_size (int): Cropped patched size for gt patches.
-        random_reverse (bool): Random reverse input frames.
-        use_hflip (bool): Use horizontal flips.
-        use_rot (bool): Use rotation (use vertical flip and transposing h and w for implementation).
-        scale (bool): Scale, which will be added automatically.
-    """
 
     def __init__(self, opt):
         super(Adobe240Dataset, self).__init__()
         self.opt = opt
         self.gt_root, self.lq_root = Path(opt['dataroot_gt']), Path(opt['dataroot_lq'])
+        
+        self.lq_size = opt['lq_size']       # fisrt stage lq_size = 32, second stage lq_size = 64
+        self.gt_size = opt['gt_size']
 
         # with open(opt['meta_info_file'], 'r') as fin:
         #     self.keys = [line.split(' ')[0] for line in fin]
         # ------ directly load image keys ------------------------------------------
         logger = get_root_logger()
-        if opt['cache_keys']:
-            logger.info('Using cache keys: {}'.format(opt['cache_keys']))
-            cache_keys = opt['cache_keys']
-        else:
-            cache_keys = 'Vimeo7_train_keys.pkl'
-        logger.info('Using cache keys - {}.'.format(cache_keys))
-        self.paths_gt = pickle.load(open(cache_keys, 'rb'))     # list['00001_0001', 00001_0002, ..., 00096_0936], len(): 64612
-        assert self.paths_gt, 'Error: GT path is empty.'
+        # if opt['cache_keys']:
+        #     logger.info('Using cache keys: {}'.format(opt['cache_keys']))
+        #     cache_keys = opt['cache_keys']
+        # else:
+        #     cache_keys = 'Vimeo7_train_keys.pkl'
+        # logger.info('Using cache keys - {}.'.format(cache_keys))
+        # self.paths_gt = pickle.load(open(cache_keys, 'rb'))     # list['00001_0001', 00001_0002, ..., 00096_0936], len(): 64612
+        # assert self.paths_gt, 'Error: GT path is empty.'
 
         # file client (io backend)
         self.file_client = None
@@ -89,9 +48,11 @@ class Adobe240Dataset(data.Dataset):
             self.is_lmdb = True
             self.io_backend_opt['db_paths'] = [self.lq_root, self.gt_root]
             self.io_backend_opt['client_keys'] = ['lq', 'gt']
-        
-        self.half_num_frame = opt['num_frame'] // 2
-        self.lr_num_frame = self.half_num_frame + 1
+            
+        self.scale = self.opt['scale']
+        self.num_frame = self.opt['num_frame']
+        self.half_num_frame = opt['num_frame'] // 2         # official: 7 // 2 = 3
+        self.lr_num_frame = self.half_num_frame + 1         # official: 3 + 1 = 4
         assert self.lr_num_frame > 1, 'Error: Not enough LR frames to interpolate'
         # determine the LR frame list
         """
@@ -101,11 +62,11 @@ class Adobe240Dataset(data.Dataset):
         5 | 0,2,4
         7 | 0,2,4,6
         """
-        self.lr_index_list = [i*2 for i in range(self.lr_num_frame)]
+        self.lr_index_list = [i*2 for i in range(self.lr_num_frame)]            # official: [0, 2, 4, 6]
         self.lr_input = False if opt['gt_size'] == opt['lq_size'] else True
         
         with open(opt['meta_info_file']) as t:
-            video_list = t.readlines()
+            video_list = t.readlines()              # ['720p_240fps_1\n', '720p_240fps_2\n', '720p_240fps_3\n', ...]
         
         self.file_list = []
         self.gt_list = []
@@ -118,11 +79,11 @@ class Adobe240Dataset(data.Dataset):
             frames = sorted([int(frame[:-4]) for frame in frames])
             frames = [str(frame) + '.png' for frame in frames]
             while index + interval*1 + 1 < len(frames):
-                video_inputs_index = [index, index + 1 + interval]
-                video_inputs = [frames[i] for i in video_inputs_index]
-                video_all_gt = [frames[i] for i in range(index, index + 2 + interval * 1)]
-                video_inputs = [osp.join(video, f) for f in video_inputs]
-                video_gts = [osp.join(video, f) for f in video_all_gt]
+                video_inputs_index = [index, index + 1 + interval]                              # [0, 8]
+                video_inputs = [frames[i] for i in video_inputs_index]                          # ['0.png', '8.png']
+                video_all_gt = [frames[i] for i in range(index, index + 2 + interval * 1)]      # ['0.png', '1.png', '2.png', '3.png', '4.png', '5.png', '6.png', '7.png', '8.png']
+                video_inputs = [osp.join(video, f) for f in video_inputs]                       # ['720p_240fps_1/0.png', '720p_240fps_1/8.png']
+                video_gts = [osp.join(video, f) for f in video_all_gt]                          # ['720p_240fps_1/0.png', '720p_240fps_1/1.png', '720p_240fps_1/2.png', '720p_240fps_1/3.png', '720p_240fps_1/4.png', '720p_240fps_1/5.png', '720p_240fps_1/6.png', '720p_240fps_1/7.png', '720p_240fps_1/8.png']
                 self.file_list.append(video_inputs)
                 self.gt_list.append(video_gts)
                 index += 1
@@ -135,38 +96,36 @@ class Adobe240Dataset(data.Dataset):
         
         logger.info(f'Length of file list: {len(self.file_list)}')
         logger.info(f'Length of gt list: {len(self.gt_list)}')
-        
-        self.as_down_sample = False
 
     def __getitem__(self, index):
         if self.file_client is None:
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
         
         # scale = self.opt['scale']
-        scale = 4
-        gt_size = self.opt['gt_size']
-        num_frame = self.opt['num_frame']
-        key = self.paths_gt[0]              # '00001_0001'
+        # gt_size = self.opt['gt_size']
+        # num_frame = self.opt['num_frame']
+        # key = self.paths_gt[0]              # '00001_0001'
+        # print('key:', key)
         
-        center_frame_idx = random.randint(2, 6)     # 2<= index <=6
+        center_frame_idx = random.randint(2, 6)     # 2<= index <=6, e.g. [(0) |1| 2 3 4 5 6 |7| (8)]
         
         # determine the neighbor frames
         interval = random.choice(self.interval_list)
-        if self.opt['border_mode']:
+        if self.opt['border_mode']:                 # official: false
             direction = 1  # 1: forward; 0: backward
             if self.random_reverse and random.random() < 0.5:
                 direction = random.choice([0, 1])
-            if center_frame_idx + interval * (num_frame - 1) > 7:
+            if center_frame_idx + interval * (self.num_frame - 1) > 7:
                 direction = 0
-            elif center_frame_idx - interval * (num_frame - 1) < 1:
+            elif center_frame_idx - interval * (self.num_frame - 1) < 1:
                 direction = 1
             # get the neighbor list
             if direction == 1:
                 neighbor_list = list(
-                    range(center_frame_idx, center_frame_idx + interval * num_frame, interval))
+                    range(center_frame_idx, center_frame_idx + interval * self.num_frame, interval))
             else:
                 neighbor_list = list(
-                    range(center_frame_idx, center_frame_idx - interval * num_frame, -interval))
+                    range(center_frame_idx, center_frame_idx - interval * self.num_frame, -interval))
         else:
             # ensure not exceeding the borders
             while (center_frame_idx + self.half_num_frame * interval > 7) or (center_frame_idx - self.half_num_frame * interval < 1):
@@ -180,15 +139,15 @@ class Adobe240Dataset(data.Dataset):
 
         # get the GT image (as the center frame)
         img_gt_lst = []
-        img_lqop_lst = [osp.join(self.lq_root, fp) for fp in self.file_list[index]]
-        img_gtop_lst = np.array([osp.join(self.gt_root, fp) for fp in self.gt_list[index]])
+        img_lqop_lst = [osp.join(self.lq_root, fp) for fp in self.file_list[index]]             # ['path.../759.png', 'path.../767.png']
+        img_gtop_lst = np.array([osp.join(self.gt_root, fp) for fp in self.gt_list[index]])     # ['path.../759.png', 'path.../760.png', ..., 'path.../767.png'], all 9 frames
         
-        gt_sampled_idx = sorted(random.sample(range(len(img_gtop_lst)), 1))
-        img_gtop_lst = img_gtop_lst[gt_sampled_idx]
+        gt_sampled_idx = sorted(random.sample(range(len(img_gtop_lst)), 1))                     # [7]
+        img_gtop_lst = img_gtop_lst[gt_sampled_idx]                                             # ['path.../766.png']
         
         times = []
         for i in gt_sampled_idx:
-            times.append(torch.tensor([i / 8]))
+            times.append(torch.tensor([i / 8]))     # [0, 1, 2, 3, 4, 5, 6, 7, 8], 8个空, e.g. 7: [tensor([0.8750])]
         
         img_lq_lst = [self.file_client.get(fp) for fp in img_lqop_lst]
         img_lq_lst = [imfrombytes(img_lq, float32=True) for img_lq in img_lq_lst]
@@ -196,12 +155,12 @@ class Adobe240Dataset(data.Dataset):
         img_gt_lst = [self.file_client.get(fp) for fp in img_gtop_lst]
         img_gt_lst = [imfrombytes(img_gt, float32=True) for img_gt in img_gt_lst]
         
-        img_lq_lst = [imresize(lq_, 1 / scale, True) for lq_ in img_lq_lst]
+        img_lq_lst = [imresize(lq_, 1 / self.scale, True) for lq_ in img_lq_lst]
         
         if self.opt['phase'] == 'train':
             if self.lr_input:
                 # randomly crop
-                img_gt, img_lqs = paired_random_crop(img_gt_lst, img_lq_lst, gt_size, scale)
+                img_gt, img_lqs = paired_random_crop(img_gt_lst, img_lq_lst, self.gt_size, self.scale)
             else:
                 pass
             
@@ -210,13 +169,18 @@ class Adobe240Dataset(data.Dataset):
             img_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
 
             img_results = img2tensor(img_results)
-            img_lqs = torch.stack(img_results[0:-1], dim=0)
-            img_gt = img_results[-1]
+            img_lqs = torch.stack(img_results[0:-1], dim=0)                 # [2, 3, h, w]
+            img_gt = img_results[-1].unsqueeze(0)                           # [1, 3, H, W]
 
         # img_lqs: (t, c, h, w)
         # img_gt: (c, h, w)
         # key: str
-        return {'lq': img_lqs, 'gt': img_gt, 'key': key, 'time': times, 'scale': (img_gt.shape[-2], img_gt.shape[-1])}
+        return {'lq': img_lqs, 
+                'gt': img_gt, 
+                # 'key': key, 
+                'time': times, 
+                'scale': self.scale,
+                'gt_size': (img_gt.shape[-2], img_gt.shape[-1])}
 
     def __len__(self):
         return len(self.file_list)
@@ -234,10 +198,10 @@ class ASAdobe240Dataset(Adobe240Dataset):
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
         
         # scale = self.opt['scale']
-        scale = 4
-        gt_size = self.opt['gt_size']
-        num_frame = self.opt['num_frame']
-        key = self.paths_gt[0]              # '00001_0001'
+        # scale = 4
+        # gt_size = self.opt['gt_size']
+        # num_frame = self.opt['num_frame']
+        # key = self.paths_gt[0]              # '00001_0001'
         
         center_frame_idx = random.randint(2, 6)     # 2<= index <=6
         
@@ -247,17 +211,17 @@ class ASAdobe240Dataset(Adobe240Dataset):
             direction = 1  # 1: forward; 0: backward
             if self.random_reverse and random.random() < 0.5:
                 direction = random.choice([0, 1])
-            if center_frame_idx + interval * (num_frame - 1) > 7:
+            if center_frame_idx + interval * (self.num_frame - 1) > 7:
                 direction = 0
-            elif center_frame_idx - interval * (num_frame - 1) < 1:
+            elif center_frame_idx - interval * (self.num_frame - 1) < 1:
                 direction = 1
             # get the neighbor list
             if direction == 1:
                 neighbor_list = list(
-                    range(center_frame_idx, center_frame_idx + interval * num_frame, interval))
+                    range(center_frame_idx, center_frame_idx + interval * self.num_frame, interval))
             else:
                 neighbor_list = list(
-                    range(center_frame_idx, center_frame_idx - interval * num_frame, -interval))
+                    range(center_frame_idx, center_frame_idx - interval * self.num_frame, -interval))
         else:
             # ensure not exceeding the borders
             while (center_frame_idx + self.half_num_frame * interval > 7) or (center_frame_idx - self.half_num_frame * interval < 1):
@@ -271,15 +235,20 @@ class ASAdobe240Dataset(Adobe240Dataset):
 
         # get the GT image (as the center frame)
         img_gt_lst = []
-        img_lqop_lst = [osp.join(self.gt_root, fp) for fp in self.file_list[index]]
-        img_gtop_lst = np.array([osp.join(self.gt_root, fp) for fp in self.gt_list[index]])
+        img_lqop_lst = [osp.join(self.gt_root, fp) for fp in self.file_list[index]]             # ['path.../759.png', 'path.../767.png']
+        img_gtop_lst = np.array([osp.join(self.gt_root, fp) for fp in self.gt_list[index]])     # ['path.../759.png', 'path.../760.png', ..., 'path.../767.png'], all 9 frames
         
-        gt_sampled_idx = sorted(random.sample(range(len(img_gtop_lst)), 3))
-        img_gtop_lst = img_gtop_lst[gt_sampled_idx]
+        if self.as_down_sample:
+            gt_sampled_idx = sorted(random.sample(range(len(img_gtop_lst)), 3))
+        else:
+            # only insert 1 frame
+            gt_sampled_idx = sorted(random.sample(range(len(img_gtop_lst)), 1))     # [7]
+            
+        img_gtop_lst = img_gtop_lst[gt_sampled_idx]                                 # ['path.../766.png']
         
         times = []
         for i in gt_sampled_idx:
-            times.append(torch.tensor([i / 8]))
+            times.append(torch.tensor([i / 8]))     # [0, 1, 2, 3, 4, 5, 6, 7, 8], 8个空, e.g. 7: [tensor([0.8750])]
         
         img_lqo_lst = [self.file_client.get(fp) for fp in img_lqop_lst]
         img_lqo_lst = [imfrombytes(img_lq, float32=True) for img_lq in img_lqo_lst]
@@ -294,6 +263,7 @@ class ASAdobe240Dataset(Adobe240Dataset):
         logger.info(f'From {iter}, start the arbitrary-scale downsampling mode.')
         
         self.as_down_sample = True
+        # self.lq_size = self.opt['lq_size'] * 2
     
     def as_collate_fn(self, batch):
         '''
@@ -307,26 +277,38 @@ class ASAdobe240Dataset(Adobe240Dataset):
         For the operation of temporal sampling, see line 189 - 191 in Adobe_arbitrary.py
         '''
         
-        d_scale = random.uniform(2, 4)      # randomly select down-sampling scale in [2, 4]
-        lq_size = 64
-        gt_size = int(np.floor(lq_size * d_scale))
+        if self.as_down_sample:
+            d_scale = random.uniform(2, 4)      # randomly select down-sampling scale in [2, 4]
+            # lq_size = 64
+            gt_size = int(np.floor(self.lq_size * d_scale))
+        else:
+            d_scale = 4
+            gt_size = int(np.floor(self.lq_size * d_scale))
+        
+        # img_lq_lst = np.stack([np.stack(i[0], axis=0) for i in batch], axis=0)      # batch 个 __getitem__ 中return的 img_lqo_lst
         
         # img crop
         x = random.randint(0, max(0, 720 - gt_size))
         y = random.randint(0, max(0, 1280 - gt_size))
         img_lq_lst = [np.stack([img_[0][i][x:x+gt_size,y:y+gt_size] 
                                 if img_[0][i].shape[0] == 720 else img_[0][i][y:y+gt_size,x:x+gt_size] for img_ in batch], axis=0) 
-                      for i in range(len(batch[0][0]))]
+                      for i in range(len(batch[0][0]))]     # list[array[bs, H, W, 3], array[bs, H, W, 3]]
         img_gt_lst = [np.stack([img_[1][i][x:x+gt_size,y:y+gt_size] 
                                 if img_[1][i].shape[0] == 720 else img_[1][i][y:y+gt_size,x:x+gt_size] for img_ in batch], axis=0) 
-                      for i in range(len(batch[0][1]))]
+                      for i in range(len(batch[0][1]))]     # list[array[bs, H, W, 3]]
         
-        # down-sampling
-        img_lq_lst = [np.stack([imresize(img_[i], 1/(2*d_scale)) for i in range(img_.shape[0])], axis=0) for img_ in img_lq_lst]
-        img_gt_lst = [np.stack([imresize(img_[i], 1/2) for i in range(img_.shape[0])], axis=0) for img_ in img_gt_lst]
+        # ------ down-sampling -----------------------------------------------------------------------------------------------------
+        # 认为这里不太合理，将下采样后的GT作为GT，不会破坏GT的纹理吗？
+        # img_lq_lst = [np.stack([imresize(img_[i], 1/(2*d_scale)) for i in range(img_.shape[0])], axis=0) for img_ in img_lq_lst]    # list[array[bs, h/2, w/2, 3], array[bs, h/2, w/2, 3]]
+        # img_gt_lst = [np.stack([imresize(img_[i], 1/2) for i in range(img_.shape[0])], axis=0) for img_ in img_gt_lst]              # list[array[bs, H/2, W/2, 3]]
+        # -->
+        img_lq_lst = [np.stack([imresize(img_[i], 1/d_scale) for i in range(img_.shape[0])], axis=0) for img_ in img_lq_lst]
+        img_gt_lst = [np.stack([img_[i] for i in range(img_.shape[0])], axis=0) for img_ in img_gt_lst]
+        # --------------------------------------------------------------------------------------------------------------------------
+        # print('img_lq_lst:', [img_lq_lst[i].shape for i in range(len(img_lq_lst))])
         
-        img_lqs = np.stack(img_lq_lst, axis=0)
-        img_gts = np.stack(img_gt_lst, axis=0)
+        img_lqs = np.stack(img_lq_lst, axis=0)      # array[2, bs, h/2, h/2, 3]
+        img_gts = np.stack(img_gt_lst, axis=0)      # array[1, bs, H/2, W/2, 3]
         
         # augmentation - flip, rotate
         img_lqs, img_gts = augment_a2(img_lqs, img_gts, hflip=True, rot=True)
@@ -335,12 +317,19 @@ class ASAdobe240Dataset(Adobe240Dataset):
         img_gts = img_gts[:, :, :, :, [2, 1, 0]]
         img_lqs = img_lqs[:, :, :, :, [2, 1, 0]]
 
-        img_gts = torch.from_numpy(np.ascontiguousarray(np.transpose(img_gts, (1, 0, 4, 2, 3)))).float()
-        img_lqs = torch.from_numpy(np.ascontiguousarray(np.transpose(img_lqs, (1, 0, 4, 2, 3)))).float()
+        img_gts = torch.from_numpy(np.ascontiguousarray(np.transpose(img_gts, (1, 0, 4, 2, 3)))).float()    # torch.Size([bs, 1, 3, H/2, W/2])
+        img_lqs = torch.from_numpy(np.ascontiguousarray(np.transpose(img_lqs, (1, 0, 4, 2, 3)))).float()    # torch.Size([bs, 2, 3, h/2, w/2])
 
-        time_t = [torch.cat([time_[2][i][None] for time_ in batch], dim=0) for i in range(len(batch[0][2]))]
+        time_t = [torch.cat([time_[2][i][None] for time_ in batch], dim=0) for i in range(len(batch[0][2]))]    # [tensor([1.])]
 
-        return {'lq': img_lqs, 'gt': img_gts, 'time': time_t, 'scale': [[img_gts.shape[-2]], [img_gts.shape[-1]]]}
+        return {
+            'lq': img_lqs, 
+            'gt': img_gts, 
+            'time': time_t, 
+            'scale': d_scale,
+            # 'gt_size': [[img_gts.shape[-2]], [img_gts.shape[-1]]]
+            'gt_size': (img_gts.shape[-2], img_gts.shape[-1])
+        }
         
 
 def augment_a2(img_LQ, img_GT, hflip=True, rot=True):
@@ -358,6 +347,93 @@ def augment_a2(img_LQ, img_GT, hflip=True, rot=True):
         img_LQ = img_LQ.transpose(0, 1, 3, 2, 4)
         img_GT = img_GT.transpose(0, 1, 3, 2, 4)
     return img_LQ, img_GT
+
+
+@DATASET_REGISTRY.register()
+class Adobe240TestDataset(data.Dataset):
+    
+    def __init__(self, opt):
+        super(Adobe240TestDataset, self).__init__()
+        
+        self.opt = opt
+        self.gt_root, self.lq_root = opt['dataroot_gt'], opt['dataroot_lq']
+        
+        logger = get_root_logger()
+        
+        # temporal augmentation
+        self.interval_list = opt['interval_list']
+        self.random_reverse = opt['random_reverse']
+        logger.info('Temporal augmentation interval list: [{}], with random reverse is {}.'.format(
+            ','.join(str(x) for x in opt['interval_list']), self.random_reverse))
+        
+        self.half_num_frame = opt['num_frames'] // 2
+        self.lr_num_frame = 1 + self.half_num_frame
+        #assert self.LR_N_frames > 1, 'Error: Not enough LR frames to interpolate'
+        #### determine the LQ frame list
+        '''
+        N | frames
+        1 | error
+        3 | 0,2
+        5 | 0,2,4
+        7 | 0,2,4,6
+        '''
+        
+        self.data_type = self.opt['data_type']
+        self.lr_input = False if opt['gt_size'] == opt['lq_size'] else True  # low resolution inputs
+        
+        #### directly load image keys
+        # if opt['cache_keys']:
+        #     logger.info('Using cache keys: {}'.format(opt['cache_keys']))
+        #     cache_keys = opt['cache_keys']
+        # else:
+        #     cache_keys = 'Vimeo7_train_keys.pkl'
+        # logger.info('Using cache keys - {}.'.format(cache_keys))
+        # self.paths_GT = pickle.load(open('/home/abcd233746pc/VideoINR-Continuous-Space-Time-Super-Resolution/{}'.format(cache_keys), 'rb'))
+     
+        #assert self.paths_GT, 'Error: GT path is empty.'
+
+        if self.data_type == 'lmdb':
+            self.GT_env, self.LQ_env = None, None
+        elif self.data_type == 'mc':  # memcached
+            self.mclient = None
+        elif self.data_type == 'img':
+            pass
+        else:
+            raise ValueError('Wrong data type: {}'.format(self.data_type))
+        
+        # with open('/work/abcd233746pc/adobe240fps_folder_test.txt') as t:
+        #     video_list = t.readlines()
+        video_list = ['walk', 'foliage', 'city', 'calendar', ]
+            
+        self.file_list = []
+        self.gt_list = []
+        interval_num = opt['ref_num'] - 1       # ref_num: 2
+        
+        for video in video_list:
+            if video[-1] == '\n':
+                video = video[:-1]
+            interval = 1
+            index = 0
+            frames = (os.listdir(os.path.join(self.gt_root , video)))
+            frames = sorted([int(frame[:-4]) for frame in frames])
+            #frames = [str(frame) + '.png' for frame in frames]
+            frames = ['{:03d}'.format(frame) + '.png' for frame in frames]
+            while index + (interval + 1) * interval_num < len(frames) - 0:
+                videoInputs = [frames[i] for i in range(index, index + (1 + interval) * interval_num + 1, (1 + interval))]
+                video_all_gt = [frames[i] for i in range(index + (1 + interval) * (interval_num//2), index + (1 + interval) * (interval_num//2+1) + 1 )]
+                videoInputs = [os.path.join(video, f) for f in videoInputs]
+                videoGts = [os.path.join(video, f) for f in video_all_gt]
+                #print(videoInputs)
+                #print(videoGts)
+                self.file_list.append(videoInputs)
+                self.gt_list.append(videoGts)
+                index += 1 + interval
+    
+    def __len__(self):
+        return len(self.file_list)
+        
+    def __getitem__(self, index):
+        pass
 
 
 if __name__ == '__main__':

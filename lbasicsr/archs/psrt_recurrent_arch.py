@@ -1,4 +1,5 @@
 import torch
+# torch.set_printoptions(profile="full")
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
@@ -10,7 +11,7 @@ from lbasicsr.utils.registry import ARCH_REGISTRY
 from lbasicsr.archs.psrt_sliding_arch import SwinIRFM
 
 
-# @ARCH_REGISTRY.register()
+@ARCH_REGISTRY.register()
 class BasicRecurrentSwin(nn.Module):
     """PSRT-Recurrent network structure.
 
@@ -161,17 +162,17 @@ class BasicRecurrentSwin(nn.Module):
 
         n, t, _, h, w = flows.size()
 
-        frame_idx = range(0, t + 1)
+        frame_idx = range(0, t + 1)                             # 
         flow_idx = range(-1, t)
-        mapping_idx = list(range(0, len(feats['spatial'])))
-        mapping_idx += mapping_idx[::-1]
+        mapping_idx = list(range(0, len(feats['spatial'])))     # [0, 1, 2, 3, 4]
+        mapping_idx += mapping_idx[::-1]                        # [0, 1, 2, 3, 4, 4, 3, 2, 1, 0]
 
         if 'backward' in module_name:
-            frame_idx = frame_idx[::-1]
+            frame_idx = frame_idx[::-1]                         # [4, 3, 2, 1, 0]
             flow_idx = frame_idx
 
         feat_prop = flows.new_zeros(n, self.embed_dim, h, w)
-        for i, idx in enumerate(frame_idx):
+        for i, idx in enumerate(frame_idx):                             # backward_1: idx [4, 3, ]
             if module_name == 'backward_1':
                 feat_current = feats['spatial'][mapping_idx[idx]]
             if module_name == 'forward_1':
@@ -304,21 +305,21 @@ class BasicRecurrentSwin(nn.Module):
                 feats['spatial'].append(feat)
                 torch.cuda.empty_cache()
         else:
-            feats_ = self.conv_first(lqs.view(-1, c, h, w))
+            feats_ = self.conv_first(lqs.view(-1, c, h, w))     # [b*t, 120, h, w]
             h, w = feats_.shape[2:]
-            feats_ = feats_.view(n, t, -1, h, w)
-            feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t)]
+            feats_ = feats_.view(n, t, -1, h, w)                # [b, t, 120, h, w]
+            feats['spatial'] = [feats_[:, i, :, :, :] for i in range(0, t)]     # [[b, 120, h, w], ...]
 
         # compute optical flow using the low-res inputs
         assert lqs_downsample.size(3) >= 64 and lqs_downsample.size(4) >= 64, (
             'The height and width of low-res inputs must be at least 64, '
             f'but got {h} and {w}.')
-        flows_forward, flows_backward = self.compute_flow(lqs_downsample)
+        flows_forward, flows_backward = self.compute_flow(lqs_downsample)       # [b, t-1, 2, h, w], [b, t-1, 2, h, w]
 
         # feature propgation
         for iter_ in [1, 2]:
             for direction in ['backward', 'forward']:
-                module = f'{direction}_{iter_}'
+                module = f'{direction}_{iter_}'     # 'backward_1', 
 
                 feats[module] = []
 
@@ -431,7 +432,7 @@ if __name__ == '__main__':
     # print("flops", model.flops() / 1e9 + 'G')
 
     input = torch.randn((1, 5, 3, img_size, img_size)).to(device)
-    print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
+    # print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
     
     with torch.inference_mode():
         out = model(input)

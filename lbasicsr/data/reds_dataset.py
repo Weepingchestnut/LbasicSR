@@ -135,7 +135,7 @@ class REDSDataset(data.Dataset):
         img_lqs = []
         for neighbor in neighbor_list:
             if self.is_lmdb:
-                img_lq_path = f'{clip_name}/{neighbor:08d}'
+                img_lq_path = f'X4/{clip_name}/{neighbor:08d}'
             else:
                 img_lq_path = self.lq_root / clip_name / f'{neighbor:08d}.png'
             img_bytes = self.file_client.get(img_lq_path, 'lq')
@@ -212,15 +212,17 @@ class ASREDSDataset(REDSDataset):
 
     def __init__(self, opt):
         super(ASREDSDataset, self).__init__(opt)
-        
-        if isinstance(self.opt['scale'], tuple):
-            self.opt['scale'] = self.opt['scale']
-        else:
-            self.opt['scale'] = (self.opt['scale'], self.opt['scale'])
 
         self.epoch = 0
         self.init_int_scale = opt.get('init_int_scale', False)
+        
         self.single_scale_ft = opt.get('single_scale_ft', False)
+        if self.single_scale_ft:
+            if isinstance(self.opt['scale'], tuple):
+                self.opt['scale'] = self.opt['scale']
+            else:
+                self.opt['scale'] = (self.opt['scale'], self.opt['scale'])
+        
         self.CL_train_set = opt.get('CL_train_set', None)
         self.only_sy_scale = opt.get('only_sy_scale', False)
 
@@ -490,7 +492,7 @@ class REDSRecurrentDataset(data.Dataset):
         img_gts = []
         for neighbor in neighbor_list:
             if self.is_lmdb:
-                img_lq_path = f'{clip_name}/{neighbor:08d}'
+                img_lq_path = f'X4/{clip_name}/{neighbor:08d}'
                 img_gt_path = f'{clip_name}/{neighbor:08d}'
             else:
                 img_lq_path = self.lq_root / clip_name / f'{neighbor:08d}.png'

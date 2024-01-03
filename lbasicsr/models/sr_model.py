@@ -113,6 +113,7 @@ class SRModel(BaseModel):
         # for arbitrary-scale
         if 'scale' in data:
             self.scale = data['scale']
+            # self.scale = (data['scale'][0].to(self.device), data['scale'][1].to(self.device))
 
     # =======================================================================
     # 优化参数，即一个完整的 train step，包括forward，loss计算，backward，参数优化等
@@ -242,7 +243,10 @@ class SRModel(BaseModel):
 
         # =========================================================================
         for idx, val_data in enumerate(dataloader):
-            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+            if val_data.get('lq_path', None):
+                img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+            else:
+                img_name = osp.splitext(osp.basename(val_data['gt_path'][0]))[0]
             # 喂测试数据
             self.feed_data(val_data)
             # 测试
@@ -321,9 +325,14 @@ class SRModel(BaseModel):
     # ==================================================================
     def get_current_visuals(self):
         logger = get_root_logger()
-        logger.info("gt: ({}, {})".format(self.gt.size(-2), self.gt.size(-1)))
-        logger.info("lq: ({}, {})".format(self.lq.size(-2), self.lq.size(-1)))
-        logger.info("output: ({}, {})".format(self.output.size(-2), self.output.size(-1)))
+        # only h, w
+        # logger.info("gt: ({}, {})".format(self.gt.size(-2), self.gt.size(-1)))
+        # logger.info("lq: ({}, {})".format(self.lq.size(-2), self.lq.size(-1)))
+        # logger.info("output: ({}, {})".format(self.output.size(-2), self.output.size(-1)))
+        # all shape
+        logger.info("gt: {}".format(self.gt.shape))
+        logger.info("lq: {}".format(self.lq.shape))
+        logger.info("output: {}".format(self.output.shape))
 
         # arbitrary-scale BI post-processing
         if self.output.ndim == 4 and self.output.shape != self.gt.shape:

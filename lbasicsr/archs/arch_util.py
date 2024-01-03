@@ -12,6 +12,7 @@ from torch.nn.modules.batchnorm import _BatchNorm
 
 from lbasicsr.ops.dcn import ModulatedDeformConvPack, modulated_deform_conv
 from lbasicsr.utils import get_root_logger
+from .quant_op import LinearOurs, Conv2dOurs, ActOurs, NoActQ
 
 
 @torch.no_grad()
@@ -362,9 +363,9 @@ to_4tuple = _ntuple(4)
 to_ntuple = _ntuple
 
 
-# =============================
+# =====================
 # for DASR (ECCV 2022)
-# =============================
+# =====================
 
 class Dynamic_conv2d(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=1, dilation=1, groups=1, if_bias=True, K=5,
@@ -450,9 +451,33 @@ class ResidualBlockNoBNDynamic(nn.Module):
         return {'x': out, 'weights': inputs['weights']}
 
 
-# =========
-# for LIIF
-# =========
+def pad_spatial(x: torch.Tensor, multiple: int = 4, padding_mode: str = 'reflect'):
+        """Apply padding spatially.
+
+        Since the PCD module in EDVR requires that the resolution is a multiple
+        of 4, we apply padding to the input LR images if their resolution is
+        not divisible by 4.
+
+        Args:
+            x (Tensor): Input LR sequence with shape (n, t, c, h, w).
+        Returns:
+            Tensor: Padded LR sequence with shape (n, t, c, h_pad, w_pad).
+        """
+        n, t, c, h, w = x.size()
+
+        pad_h = (multiple - h % multiple) % multiple
+        pad_w = (multiple - w % multiple) % multiple
+
+        # padding
+        x = x.view(-1, c, h, w)
+        x = F.pad(x, [0, pad_w, 0, pad_h], mode=padding_mode)
+
+        return x.view(n, t, c, h + pad_h, w + pad_w)
+
+
+# =====================
+# for LIIF (CVPR'2021)
+# =====================
 
 def make_coord(shape, ranges=None, flatten=True):
     """Make coordinates at grid centers.
@@ -483,3 +508,86 @@ def make_coord(shape, ranges=None, flatten=True):
     if flatten:
         coord = coord.view(-1, coord.shape[-1])     # [H*W, 2]
     return coord
+
+
+# ===========================
+# for QuantSR (NeurIPS'2023)
+# ===========================
+
+QConv2ds = {
+    "Ours": Conv2dOurs,
+}
+
+QLinears = {
+    "Ours": LinearOurs,
+}
+
+QActQs = {
+    "Ours": ActOurs,
+}
+
+
+class QResidualBlockNoBN(nn.Module):
+    """Residual block without BN.
+
+    It has a style of:
+        ---Conv-ReLU-Conv-+-
+         |________________|
+
+    Args:
+        num_feat (int): Channel number of intermediate features.
+            Default: 64.
+        res_scale (float): Residual scale. Default: 1.
+        pytorch_init (bool): If set to True, use pytorch default init,
+            otherwise, use default_init_weights. Default: False.
+    """
+
+    def __init__(self, num_feat=64, res_scale=1, pytorch_init=False, qconv='Base', nbits_w=4, nbits_a=4):
+        super(QResidualBlockNoBN, self).__init__()
+        self.res_scale = res_scale
+        self.conv1 = QConv2ds[qconv](num_feat, num_feat, 3, 1, 1, bias=True, nbits_w=nbits_w, nbits_a=nbits_a)
+        self.conv2 = QConv2ds[qconv](num_feat, num_feat, 3, 1, 1, bias=True, nbits_w=nbits_w, nbits_a=nbits_a)
+        self.relu = nn.ReLU(inplace=True)
+        self.skip = [False, False, False]
+        self.version = -1
+        self.learnable_shortcut = nn.Parameter(torch.ones(1), requires_grad=True)
+
+        if not pytorch_init:
+            default_init_weights([self.conv1, self.conv2], 0.1)
+        
+
+    def forward(self, x):
+        assert self.version in [-1, 0, 1, 2]
+        identity = x
+        # v2
+        if self.version == -1:
+            out = self.conv2(self.relu(self.conv1(x)))
+            return identity * self.learnable_shortcut + (out * self.res_scale)
+        else:
+            if self.skip[self.version]:
+                return identity * self.learnable_shortcut
+            else:
+                out = self.conv2(self.relu(self.conv1(x)))
+                return identity * self.learnable_shortcut + (out * self.res_scale)
+
+
+class QUpsample(nn.Sequential):
+    """Upsample module.
+
+    Args:
+        scale (int): Scale factor. Supported scales: 2^n and 3.
+        num_feat (int): Channel number of intermediate features.
+    """
+
+    def __init__(self, scale, num_feat, qconv='Base', nbits_w=4, nbits_a=4):
+        m = []
+        if (scale & (scale - 1)) == 0:  # scale = 2^n
+            for _ in range(int(math.log(scale, 2))):
+                m.append(QConv2ds[qconv](num_feat, 4 * num_feat, 3, 1, 1, nbits_w=nbits_w, nbits_a=nbits_a))
+                m.append(nn.PixelShuffle(2))
+        elif scale == 3:
+            m.append(QConv2ds[qconv](num_feat, 9 * num_feat, 3, 1, 1, nbits_w=nbits_w, nbits_a=nbits_a))
+            m.append(nn.PixelShuffle(3))
+        else:
+            raise ValueError(f'scale {scale} is not supported. Supported scales: 2^n and 3.')
+        super(QUpsample, self).__init__(*m)

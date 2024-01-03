@@ -139,6 +139,7 @@ class ASINRImageDataset(data.Dataset):
             # BGR to RGB, HWC to CHW, numpy to tensor
             img_gt = img2tensor(img_gt, bgr2rgb=True, float32=True)
             img_lq = self.down_sampling(img_gt, (img_gt.shape[-2] // self.val_scale[0], img_gt.shape[-1] // self.val_scale[1]))
+            scale = self.val_scale
         
         # normalize
         if self.mean is not None or self.std is not None:
@@ -148,7 +149,7 @@ class ASINRImageDataset(data.Dataset):
         # Generate coordinate and cell
         img_gt, coord, cell = self.generate_coordinate_and_cell(img_gt)
 
-        return {'lq': img_lq, 'gt': img_gt, 'gt_path': gt_path, 'coord': coord, 'cell': cell}
+        return {'lq': img_lq, 'gt': img_gt, 'gt_path': gt_path, 'coord': coord, 'cell': cell, 'scale': scale}
 
     def __len__(self):
         return len(self.paths)

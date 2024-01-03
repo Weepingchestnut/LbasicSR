@@ -17,9 +17,11 @@ class VideoBaseModel(SRModel):
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img):
         dataset = dataloader.dataset
+        # ------ for arbitrary-scale val -------------------------
         if dataset.opt.get('downsampling_scale', 0) != 0:
             self.opt['scale'] = dataset.opt['downsampling_scale']
         dataset_name = dataset.opt['name']
+        # --------------------------------------------------------
         with_metrics = self.opt['val']['metrics'] is not None
         # initialize self.metric_results
         # It is a dict: {

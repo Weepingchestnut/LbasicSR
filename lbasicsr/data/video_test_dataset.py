@@ -323,7 +323,8 @@ class ASVideoTestDataset(VideoTestDataset):
             'folder': folder,  # folder name
             'idx': self.data_info['idx'][index],  # e.g., 0/99
             'border': border,  # 1 for border, 0 for non-border
-            'lq_path': lq_path  # center frame
+            'lq_path': lq_path,  # center frame
+            'scale': self.opt['scale']
         }
 
 

@@ -15,6 +15,7 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from lbasicsr.archs.op.deform_attn import deform_attn, DeformAttnPack
+from lbasicsr.metrics.runtime import VSR_runtime_test
 from lbasicsr.utils.registry import ARCH_REGISTRY
 
 
@@ -736,7 +737,7 @@ class Upsample(nn.Sequential):
         super(Upsample, self).__init__(*m)
 
 
-@ARCH_REGISTRY.register()
+# @ARCH_REGISTRY.register()
 class RVRT(nn.Module):
     """ Recurrent Video Restoration Transformer with Guided Deformable Attention (RVRT).
             A PyTorch impl of : `Recurrent Video Restoration Transformer with Guided Deformable Attention`  -
@@ -978,11 +979,11 @@ class RVRT(nn.Module):
 
         n, t, _, h, w = flows.size()
         if 'backward' in module_name:
-            flow_idx = range(0, t + 1)[::-1]
-            clip_idx = range(0, (t + 1) // self.clip_size)[::-1]
+            flow_idx = range(0, t + 1)[::-1]                        # [6, 5, 4, 3, 2, 1, 0]
+            clip_idx = range(0, (t + 1) // self.clip_size)[::-1]    # [3, 2, 1, 0]
         else:
-            flow_idx = range(-1, t)
-            clip_idx = range(0, (t + 1) // self.clip_size)
+            flow_idx = range(-1, t)                                 # [0, 1, 2, 3, 4, 5, 6]
+            clip_idx = range(0, (t + 1) // self.clip_size)          # [0, 1, 2, 3]
 
         if '_1' in module_name:
             updated_flows[f'{module_name}_n1'] = []
@@ -1169,14 +1170,220 @@ class RVRT(nn.Module):
 
         # reconstruction
         return self.upsample(lqs[:, :, :3, :, :], feats)
+    
+    # -------------------------------------------
+    # test influence, from vrt_model _test_video
+    # -------------------------------------------
+    # def patch_forward(self, lqs):
+    #     """Forward function for RVRT.
+
+    #     Args:
+    #         lqs (tensor): Input low quality (LQ) sequence with
+    #             shape (n, t, c, h, w).
+
+    #     Returns:
+    #         Tensor: Output HR sequence with shape (n, t, c, 4h, 4w).
+    #     """
+
+    #     n, t, _, h, w = lqs.size()
+
+    #     # whether to cache the features in CPU
+    #     self.cpu_cache = True if t > self.cpu_cache_length else False
+
+    #     # if self.upscale == 4:
+    #     if self.upscale != 1:
+    #         lqs_downsample = lqs.clone()
+    #     else:
+    #         lqs_downsample = F.interpolate(lqs[:, :, :3, :, :].view(-1, 3, h, w), scale_factor=0.25, mode='bicubic')\
+    #             .view(n, t, 3, h // 4, w // 4)
+
+    #     # check whether the input is an extended sequence
+    #     self.check_if_mirror_extended(lqs)
+
+    #     # shallow feature extractions
+    #     feats = {}
+    #     if self.cpu_cache:
+    #         feats['shallow'] = []
+    #         for i in range(0, t // self.clip_size):
+    #             feat = self.feat_extract(lqs[:, i * self.clip_size:(i + 1) * self.clip_size, :, :, :]).cpu()
+    #             feats['shallow'].append(feat)
+    #         flows_forward, flows_backward = self.compute_flow(lqs_downsample)
+
+    #         lqs = lqs.cpu()
+    #         lqs_downsample = lqs_downsample.cpu()
+    #         flows_backward = flows_backward.cpu()
+    #         flows_forward = flows_forward.cpu()
+    #         torch.cuda.empty_cache()
+    #     else:
+    #         feats['shallow'] = list(torch.chunk(self.feat_extract(lqs), t // self.clip_size, dim=1))
+    #         flows_forward, flows_backward = self.compute_flow(lqs_downsample)
+
+    #     # recurrent feature refinement
+    #     updated_flows = {}
+    #     for iter_ in [1, 2]:
+    #         for direction in ['backward', 'forward']:
+    #             if direction == 'backward':
+    #                 flows = flows_backward
+    #             else:
+    #                 flows = flows_forward if flows_forward is not None else flows_backward.flip(1)
+
+    #             module_name = f'{direction}_{iter_}'
+    #             feats[module_name] = []
+    #             feats = self.propagate(feats, flows, module_name, updated_flows)
+
+    #     # reconstruction
+    #     return self.upsample(lqs[:, :, :3, :, :], feats)
+
+    # def forward(self, lq):
+    #     '''test the video as a whole or as clips (divided temporally). '''
+        
+    #     num_frame_testing = 0
+        
+    #     if num_frame_testing:
+    #         # test as multiple clips if out-of-memory
+    #         sf = 4
+    #         # if isinstance(self.opt['scale'], tuple):
+    #         #     sf = self.opt['scale'][0]
+    #         # else:
+    #         #     sf = self.opt['scale']
+    #         num_frame_overlapping = 2
+    #         not_overlap_border = False
+    #         b, d, c, h, w = lq.size()
+    #         # c = c - 1 if self.opt['network_g'].get('nonblind_denoising', False) else c
+    #         c = c - 1 if False else c
+    #         stride = num_frame_testing - num_frame_overlapping
+    #         d_idx_list = list(range(0, d-num_frame_testing, stride)) + [max(0, d-num_frame_testing)]
+    #         if sf in [2, 3, 4]:
+    #             E = torch.zeros(b, d, c, h*sf, w*sf)
+    #         else:
+    #             E = torch.zeros(b, d, c, h * (int(sf)+1), w * (int(sf)+1))
+    #         W = torch.zeros(b, d, 1, 1, 1)
+
+    #         for d_idx in d_idx_list:
+    #             lq_clip = lq[:, d_idx:d_idx+num_frame_testing, ...]
+    #             out_clip = self._test_clip(lq_clip)
+    #             out_clip_mask = torch.ones((b, min(num_frame_testing, d), 1, 1, 1))
+
+    #             if not_overlap_border:
+    #                 if d_idx < d_idx_list[-1]:
+    #                     out_clip[:, -num_frame_overlapping//2:, ...] *= 0
+    #                     out_clip_mask[:, -num_frame_overlapping//2:, ...] *= 0
+    #                 if d_idx > d_idx_list[0]:
+    #                     out_clip[:, :num_frame_overlapping//2, ...] *= 0
+    #                     out_clip_mask[:, :num_frame_overlapping//2, ...] *= 0
+
+    #             E[:, d_idx:d_idx+num_frame_testing, ...].add_(out_clip)
+    #             W[:, d_idx:d_idx+num_frame_testing, ...].add_(out_clip_mask)
+    #         output = E.div_(W)
+    #     else:
+    #         # test as one clip (the whole video) if you have enough memory
+    #         # window_size = self.opt['network_g'].get('window_size', [6,8,8])
+    #         window_size = [2, 8, 8]
+    #         d_old = lq.size(1)
+    #         d_pad = (d_old // window_size[0] + 1) * window_size[0] - d_old
+    #         lq = torch.cat([lq, torch.flip(lq[:, -d_pad:, ...], [1])], 1)
+    #         output = self._test_clip(lq)
+    #         output = output[:, :d_old, :, :, :]
+
+    #     return output
+
+    # def _test_clip(self, lq):
+    #     ''' test the clip as a whole or as patches. '''
+
+    #     # if isinstance(self.opt['scale'], tuple):
+    #     #     sf = self.opt['scale'][0]
+    #     # else:
+    #     #     sf = self.opt['scale']
+    #     sf = 4
+    #     # window_size = self.opt['network_g'].get('window_size', [6, 8, 8])
+    #     window_size = [2, 8, 8]
+    #     # size_patch_testing = self.opt['val'].get('size_patch_testing', 0)
+    #     size_patch_testing = 128
+    #     assert size_patch_testing % window_size[-1] == 0, 'testing patch size should be a multiple of window_size.'
+
+    #     if size_patch_testing:
+    #         # divide the clip to patches (spatially only, tested patch by patch)
+    #         # overlap_size = self.opt['val'].get('overlap_size', 20)
+    #         overlap_size = 20
+    #         not_overlap_border = True
+
+    #         # test patch by patch
+    #         b, d, c, h, w = lq.size()
+    #         # c = c - 1 if self.opt['network_g'].get('nonblind_denoising', False) else c
+    #         c = c - 1 if False else c
+    #         stride = size_patch_testing - overlap_size
+    #         h_idx_list = list(range(0, h-size_patch_testing, stride)) + [max(0, h-size_patch_testing)]
+    #         w_idx_list = list(range(0, w-size_patch_testing, stride)) + [max(0, w-size_patch_testing)]
+    #         if sf in [2, 3, 4]:
+    #             E = torch.zeros(b, d, c, h*sf, w*sf)
+    #         else:
+    #             E = torch.zeros(b, d, c, h * (int(sf)+1), w * (int(sf)+1))
+    #         W = torch.zeros_like(E)
+
+    #         for h_idx in h_idx_list:
+    #             for w_idx in w_idx_list:
+    #                 in_patch = lq[..., h_idx:h_idx+size_patch_testing, w_idx:w_idx+size_patch_testing]
+    #                 # if hasattr(self, 'netE'):
+    #                 #     out_patch = self.netE(in_patch).detach().cpu()
+    #                 # else:
+    #                 #     out_patch = self.net_g(in_patch).detach().cpu()     # torch.Size([1, 32, 3, 512, 512])
+    #                 out_patch = self.patch_forward(in_patch).detach().cpu()
+
+    #                 out_patch_mask = torch.ones_like(out_patch)
+
+    #                 if not_overlap_border:
+    #                     if h_idx < h_idx_list[-1]:
+    #                         out_patch[..., -overlap_size//2:, :] *= 0
+    #                         out_patch_mask[..., -overlap_size//2:, :] *= 0
+    #                     if w_idx < w_idx_list[-1]:
+    #                         out_patch[..., :, -overlap_size//2:] *= 0
+    #                         out_patch_mask[..., :, -overlap_size//2:] *= 0
+    #                     if h_idx > h_idx_list[0]:
+    #                         out_patch[..., :overlap_size//2, :] *= 0
+    #                         out_patch_mask[..., :overlap_size//2, :] *= 0
+    #                     if w_idx > w_idx_list[0]:
+    #                         out_patch[..., :, :overlap_size//2] *= 0
+    #                         out_patch_mask[..., :, :overlap_size//2] *= 0
+    #                 if sf in [2, 3, 4]:
+    #                     E[..., h_idx*sf:(h_idx+size_patch_testing)*sf, w_idx*sf:(w_idx+size_patch_testing)*sf].add_(out_patch)
+    #                     W[..., h_idx*sf:(h_idx+size_patch_testing)*sf, w_idx*sf:(w_idx+size_patch_testing)*sf].add_(out_patch_mask)
+    #                 else:
+    #                     E[..., h_idx * (int(sf)+1):(h_idx+size_patch_testing) * (int(sf)+1), 
+    #                            w_idx * (int(sf)+1):(w_idx+size_patch_testing) * (int(sf)+1)].add_(out_patch)
+    #                     W[..., h_idx * (int(sf)+1):(h_idx+size_patch_testing) * (int(sf)+1), 
+    #                            w_idx * (int(sf)+1):(w_idx+size_patch_testing) * (int(sf)+1)].add_(out_patch_mask)
+    #         output = E.div_(W)
+
+    #     else:
+    #         _, _, _, h_old, w_old = lq.size()
+    #         # h_pad = (h_old// window_size[1]+1)*window_size[1] - h_old   # (144 // 8 + 1) * 8 - 144 = 8
+    #         # w_pad = (w_old// window_size[2]+1)*window_size[2] - w_old   # (180 // 8 + 1) * 8 - 180 = 4
+    #         # ref RVRT test
+    #         h_pad = (window_size[1] - h_old % window_size[1]) % window_size[1]      # (8 - 144 % 8) % 8 = 0
+    #         w_pad = (window_size[2] - w_old % window_size[2]) % window_size[2]      # (8 - 180 % 8) % 8 = 4
+
+    #         lq = torch.cat([lq, torch.flip(lq[:, :, :, -h_pad:, :], [3])], 3) if h_pad else lq
+    #         lq = torch.cat([lq, torch.flip(lq[:, :, :, :, -w_pad:], [4])], 4) if w_pad else lq
+            
+    #         output = self.net_g(lq)
+    #         # for arbitrary-scale VSR, use BI post-process
+    #         if sf in [2, 3, 4]:
+    #             output = output[:, :, :, :h_old*sf, :w_old*sf]
+    #         else:
+    #             output = output[:, :, :, :h_old * (int(sf)+1), :w_old * (int(sf)+1)]
+                
+
+    #     return output
+        
 
 
 if __name__ == '__main__':
+    from torch.profiler import profile, record_function, ProfilerActivity
     from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # device = 'cpu'    cuda.cpp not support cpu
     
+    scale = (4, 4)
     model = RVRT(upscale=4, 
                  clip_size=2, 
                  img_size=[2, 64, 64], 
@@ -1196,123 +1403,197 @@ if __name__ == '__main__':
                  no_checkpoint_ffn_blocks=[],
                  cpu_cache_length=100).to(device)
     model.eval()
+    
+    # input = torch.rand(1, 7, 3, 180, 320).to(device)    # the number of frame should be even偶数
+    input = torch.rand(1, 8, 3, 64, 64).to(device)
+    
+    # ------ torch profile -------------------------
+    with profile(
+        activities=[
+            ProfilerActivity.CPU,
+            ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+    ) as prof:
+        with record_function("model_inference"):
+            out = model(input)
+    
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    
+    # ------ Runtime ------------------------------
+    VSR_runtime_test(model, input, scale)
 
+    # ------ Parameter ----------------------------
     print(
         "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
-
-    input = torch.rand(1, 30, 3, 64, 64).to(device)     # the number of frame should be even偶数
+    
+    # ------ FLOPs --------------------------------
     # get_flops(net, [5, 3, 180, 320])
-    print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
-
     with torch.no_grad():
+        print('Input:', input.shape)
+        print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
         out = model(input)
-
-    print(out.shape)
+        print('Output:', out.shape)
 
 """
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                        model_inference        71.84%       16.007s       100.00%       22.282s       22.282s       0.000us         0.00%        5.200s        5.200s      84.37 Mb    -372.60 Mb      48.00 Mb    -461.92 Gb             1  
+                                     DeformAttnFunction         0.10%      21.985ms         1.11%     246.621ms       3.425ms     209.204ms         4.02%        1.784s      24.775ms           0 b           0 b       2.53 Gb    -238.18 Gb            72  
+                                            aten::copy_         0.20%      43.815ms         8.04%        1.792s     305.445us        1.557s        29.94%        1.557s     265.375us           0 b           0 b           0 b           0 b          5868  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us        1.519s        29.20%        1.519s     308.176us           0 b           0 b           0 b           0 b          4928  
+                                            aten::clone         0.12%      27.035ms         1.73%     385.875ms      99.095us       0.000us         0.00%        1.438s     369.187us           0 b           0 b     272.59 Gb           0 b          3894  
+                                          aten::flatten         0.01%       2.821ms         0.14%      30.972ms      47.796us       0.000us         0.00%        1.126s       1.738ms           0 b           0 b     182.25 Gb           0 b           648  
+                                      aten::convolution         0.03%       6.202ms         6.93%        1.544s       1.660ms       0.000us         0.00%     921.644ms     991.015us           0 b           0 b      32.86 Gb           0 b           930  
+                                     aten::_convolution         0.07%      15.090ms         6.90%        1.538s       1.654ms       0.000us         0.00%     921.644ms     991.015us           0 b           0 b      32.86 Gb           0 b           930  
+                                           aten::matmul         0.18%      40.073ms         3.19%     710.542ms     210.718us       0.000us         0.00%     912.255ms     270.538us           0 b           0 b     161.41 Gb      -2.53 Gb          3372  
+                                           aten::conv3d         0.01%       2.657ms         6.51%        1.450s       2.545ms       0.000us         0.00%     868.015ms       1.523ms           0 b           0 b      31.86 Gb           0 b           570  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 22.282s
+Self CUDA time total: 5.200s
+
+Warm up ...
+
+Testing ...
+
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 300/300 [26:07<00:00,  5.22s/it]
+
+Average Runtime: 5222.508 ms
+
 Model have 10.782M parameters in total
+Input: torch.Size([1, 7, 3, 180, 320])
 | module                                           | #parameters or shape   | #flops     | #activations   |
 |:-------------------------------------------------|:-----------------------|:-----------|:---------------|
-| model                                            | 10.782M                | 1.407T     | 6.162G         |
-|  spynet                                          |  1.44M                 |  75.987G   |  46.235M       |
-|   spynet.basic_module                            |   1.44M                |   75.973G  |   46.235M      |
-|    spynet.basic_module.0.basic_module            |    0.24M               |    55.658M |    33.872K     |
-|    spynet.basic_module.1.basic_module            |    0.24M               |    0.223G  |    0.135M      |
-|    spynet.basic_module.2.basic_module            |    0.24M               |    0.891G  |    0.542M      |
-|    spynet.basic_module.3.basic_module            |    0.24M               |    3.562G  |    2.168M      |
-|    spynet.basic_module.4.basic_module            |    0.24M               |    14.248G |    8.671M      |
-|    spynet.basic_module.5.basic_module            |    0.24M               |    56.994G |    34.685M     |
-|  feat_extract.main                               |  0.363M                |  48.855G   |  0.413G        |
-|   feat_extract.main.1                            |   4.032K               |   0.478G   |   17.695M      |
+| model                                            | 10.782M                | 8.697T     | 38.142G        |
+|  spynet.basic_module                             |  1.44M                 |  0.44T     |  0.268G        |
+|   spynet.basic_module.0.basic_module             |   0.24M                |   0.322G   |   0.196M       |
+|    spynet.basic_module.0.basic_module.0          |    12.576K             |    16.859M |    43.008K     |
+|    spynet.basic_module.0.basic_module.2          |    0.1M                |    0.135G  |    86.016K     |
+|    spynet.basic_module.0.basic_module.4          |    0.1M                |    0.135G  |    43.008K     |
+|    spynet.basic_module.0.basic_module.6          |    25.104K             |    33.718M |    21.504K     |
+|    spynet.basic_module.0.basic_module.8          |    1.57K               |    2.107M  |    2.688K      |
+|   spynet.basic_module.1.basic_module             |   0.24M                |   1.29G    |   0.785M       |
+|    spynet.basic_module.1.basic_module.0          |    12.576K             |    67.437M |    0.172M      |
+|    spynet.basic_module.1.basic_module.2          |    0.1M                |    0.539G  |    0.344M      |
+|    spynet.basic_module.1.basic_module.4          |    0.1M                |    0.539G  |    0.172M      |
+|    spynet.basic_module.1.basic_module.6          |    25.104K             |    0.135G  |    86.016K     |
+|    spynet.basic_module.1.basic_module.8          |    1.57K               |    8.43M   |    10.752K     |
+|   spynet.basic_module.2.basic_module             |   0.24M                |   5.159G   |   3.14M        |
+|    spynet.basic_module.2.basic_module.0          |    12.576K             |    0.27G   |    0.688M      |
+|    spynet.basic_module.2.basic_module.2          |    0.1M                |    2.158G  |    1.376M      |
+|    spynet.basic_module.2.basic_module.4          |    0.1M                |    2.158G  |    0.688M      |
+|    spynet.basic_module.2.basic_module.6          |    25.104K             |    0.539G  |    0.344M      |
+|    spynet.basic_module.2.basic_module.8          |    1.57K               |    33.718M |    43.008K     |
+|   spynet.basic_module.3.basic_module             |   0.24M                |   20.636G  |   12.558M      |
+|    spynet.basic_module.3.basic_module.0          |    12.576K             |    1.079G  |    2.753M      |
+|    spynet.basic_module.3.basic_module.2          |    0.1M                |    8.632G  |    5.505M      |
+|    spynet.basic_module.3.basic_module.4          |    0.1M                |    8.632G  |    2.753M      |
+|    spynet.basic_module.3.basic_module.6          |    25.104K             |    2.158G  |    1.376M      |
+|    spynet.basic_module.3.basic_module.8          |    1.57K               |    0.135G  |    0.172M      |
+|   spynet.basic_module.4.basic_module             |   0.24M                |   82.542G  |   50.233M      |
+|    spynet.basic_module.4.basic_module.0          |    12.576K             |    4.316G  |    11.01M      |
+|    spynet.basic_module.4.basic_module.2          |    0.1M                |    34.528G |    22.02M      |
+|    spynet.basic_module.4.basic_module.4          |    0.1M                |    34.528G |    11.01M      |
+|    spynet.basic_module.4.basic_module.6          |    25.104K             |    8.632G  |    5.505M      |
+|    spynet.basic_module.4.basic_module.8          |    1.57K               |    0.539G  |    0.688M      |
+|   spynet.basic_module.5.basic_module             |   0.24M                |   0.33T    |   0.201G       |
+|    spynet.basic_module.5.basic_module.0          |    12.576K             |    17.264G |    44.04M      |
+|    spynet.basic_module.5.basic_module.2          |    0.1M                |    0.138T  |    88.08M      |
+|    spynet.basic_module.5.basic_module.4          |    0.1M                |    0.138T  |    44.04M      |
+|    spynet.basic_module.5.basic_module.6          |    25.104K             |    34.528G |    22.02M      |
+|    spynet.basic_module.5.basic_module.8          |    1.57K               |    2.158G  |    2.753M      |
+|  feat_extract.main                               |  0.363M                |  0.313T    |  2.642G        |
+|   feat_extract.main.1                            |   4.032K               |   3.058G   |   0.113G       |
 |    feat_extract.main.1.weight                    |    (144, 3, 1, 3, 3)   |            |                |
 |    feat_extract.main.1.bias                      |    (144,)              |            |                |
-|   feat_extract.main.3                            |   0.288K               |   88.474M  |   0            |
+|   feat_extract.main.3                            |   0.288K               |   0.566G   |   0            |
 |    feat_extract.main.3.weight                    |    (144,)              |            |                |
 |    feat_extract.main.3.bias                      |    (144,)              |            |                |
-|   feat_extract.main.5.0                          |   0.359M               |   48.2G    |   0.395G       |
-|    feat_extract.main.5.0.residual_group.blocks   |    0.338M              |    45.652G |    0.377G      |
-|    feat_extract.main.5.0.linear                  |    20.88K              |    2.548G  |    17.695M     |
-|   feat_extract.main.7                            |   0.288K               |   88.474M  |   0            |
+|   feat_extract.main.5.0                          |   0.359M               |   0.308T   |   2.529G       |
+|    feat_extract.main.5.0.residual_group.blocks   |    0.338M              |    0.292T  |    2.416G      |
+|    feat_extract.main.5.0.linear                  |    20.88K              |    16.307G |    0.113G      |
+|   feat_extract.main.7                            |   0.288K               |   0.566G   |   0            |
 |    feat_extract.main.7.weight                    |    (144,)              |            |                |
 |    feat_extract.main.7.bias                      |    (144,)              |            |                |
-|  backbone                                        |  5.527M                |  0.744T    |  3.987G        |
-|   backbone.backward_1.main                       |   1.102M               |   0.152T   |   0.997G       |
-|    backbone.backward_1.main.1                    |    0.373M              |    45.865G |    17.695M     |
-|    backbone.backward_1.main.3                    |    0.288K              |    88.474M |    0           |
-|    backbone.backward_1.main.5                    |    0.728M              |    0.105T  |    0.979G      |
-|    backbone.backward_1.main.7                    |    0.288K              |    88.474M |    0           |
-|   backbone.forward_1.main                        |   1.288M               |   0.174T   |   0.997G       |
-|    backbone.forward_1.main.1                     |    0.56M               |    68.797G |    17.695M     |
-|    backbone.forward_1.main.3                     |    0.288K              |    88.474M |    0           |
-|    backbone.forward_1.main.5                     |    0.728M              |    0.105T  |    0.979G      |
-|    backbone.forward_1.main.7                     |    0.288K              |    88.474M |    0           |
-|   backbone.backward_2.main                       |   1.475M               |   0.197T   |   0.997G       |
-|    backbone.backward_2.main.1                    |    0.747M              |    91.729G |    17.695M     |
-|    backbone.backward_2.main.3                    |    0.288K              |    88.474M |    0           |
-|    backbone.backward_2.main.5                    |    0.728M              |    0.105T  |    0.979G      |
-|    backbone.backward_2.main.7                    |    0.288K              |    88.474M |    0           |
-|   backbone.forward_2.main                        |   1.662M               |   0.22T    |   0.997G       |
-|    backbone.forward_2.main.1                     |    0.933M              |    0.115T  |    17.695M     |
-|    backbone.forward_2.main.3                     |    0.288K              |    88.474M |    0           |
-|    backbone.forward_2.main.5                     |    0.728M              |    0.105T  |    0.979G      |
-|    backbone.forward_2.main.7                     |    0.288K              |    88.474M |    0           |
-|  deform_align                                    |  1.816M                |  0.207T    |  1.006G        |
-|   deform_align.backward_1                        |   0.454M               |   51.821G  |   0.251G       |
-|    deform_align.backward_1.proj_q.1              |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.backward_1.proj_k.1              |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.backward_1.proj_v.1              |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.backward_1.mlp.1                 |    83.376K             |    9.513G  |    49.545M     |
-|    deform_align.backward_1.conv_offset           |    0.204M              |    23.283G |    86.245M     |
-|    deform_align.backward_1.proj.1                |    41.616K             |    4.756G  |    16.515M     |
-|   deform_align.forward_1                         |   0.454M               |   51.821G  |   0.251G       |
-|    deform_align.forward_1.proj_q.1               |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.forward_1.proj_k.1               |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.forward_1.proj_v.1               |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.forward_1.mlp.1                  |    83.376K             |    9.513G  |    49.545M     |
-|    deform_align.forward_1.conv_offset            |    0.204M              |    23.283G |    86.245M     |
-|    deform_align.forward_1.proj.1                 |    41.616K             |    4.756G  |    16.515M     |
-|   deform_align.backward_2                        |   0.454M               |   51.821G  |   0.251G       |
-|    deform_align.backward_2.proj_q.1              |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.backward_2.proj_k.1              |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.backward_2.proj_v.1              |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.backward_2.mlp.1                 |    83.376K             |    9.513G  |    49.545M     |
-|    deform_align.backward_2.conv_offset           |    0.204M              |    23.283G |    86.245M     |
-|    deform_align.backward_2.proj.1                |    41.616K             |    4.756G  |    16.515M     |
-|   deform_align.forward_2                         |   0.454M               |   51.821G  |   0.251G       |
-|    deform_align.forward_2.proj_q.1               |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.forward_2.proj_k.1               |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.forward_2.proj_v.1               |    41.76K              |    4.756G  |    33.03M      |
-|    deform_align.forward_2.mlp.1                  |    83.376K             |    9.513G  |    49.545M     |
-|    deform_align.forward_2.conv_offset            |    0.204M              |    23.283G |    86.245M     |
-|    deform_align.forward_2.proj.1                 |    41.616K             |    4.756G  |    16.515M     |
-|  reconstruction.main                             |  1.292M                |  0.163T    |  0.413G        |
-|   reconstruction.main.1                          |   0.933M               |   0.115T   |   17.695M      |
+|  backbone                                        |  5.527M                |  4.759T    |  25.518G       |
+|   backbone.backward_1.main                       |   1.102M               |   0.97T    |   6.38G        |
+|    backbone.backward_1.main.1                    |    0.373M              |    0.294T  |    0.113G      |
+|    backbone.backward_1.main.3                    |    0.288K              |    0.566G  |    0           |
+|    backbone.backward_1.main.5                    |    0.728M              |    0.675T  |    6.266G      |
+|    backbone.backward_1.main.7                    |    0.288K              |    0.566G  |    0           |
+|   backbone.forward_1.main                        |   1.288M               |   1.116T   |   6.38G        |
+|    backbone.forward_1.main.1                     |    0.56M               |    0.44T   |    0.113G      |
+|    backbone.forward_1.main.3                     |    0.288K              |    0.566G  |    0           |
+|    backbone.forward_1.main.5                     |    0.728M              |    0.675T  |    6.266G      |
+|    backbone.forward_1.main.7                     |    0.288K              |    0.566G  |    0           |
+|   backbone.backward_2.main                       |   1.475M               |   1.263T   |   6.38G        |
+|    backbone.backward_2.main.1                    |    0.747M              |    0.587T  |    0.113G      |
+|    backbone.backward_2.main.3                    |    0.288K              |    0.566G  |    0           |
+|    backbone.backward_2.main.5                    |    0.728M              |    0.675T  |    6.266G      |
+|    backbone.backward_2.main.7                    |    0.288K              |    0.566G  |    0           |
+|   backbone.forward_2.main                        |   1.662M               |   1.41T    |   6.38G        |
+|    backbone.forward_2.main.1                     |    0.933M              |    0.734T  |    0.113G      |
+|    backbone.forward_2.main.3                     |    0.288K              |    0.566G  |    0           |
+|    backbone.forward_2.main.5                     |    0.728M              |    0.675T  |    6.266G      |
+|    backbone.forward_2.main.7                     |    0.288K              |    0.566G  |    0           |
+|  deform_align                                    |  1.816M                |  1.066T    |  5.172G        |
+|   deform_align.backward_1                        |   0.454M               |   0.267T   |   1.293G       |
+|    deform_align.backward_1.proj_q.1              |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.backward_1.proj_k.1              |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.backward_1.proj_v.1              |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.backward_1.mlp.1                 |    83.376K             |    48.922G |    0.255G      |
+|    deform_align.backward_1.conv_offset           |    0.204M              |    0.12T   |    0.444G      |
+|    deform_align.backward_1.proj.1                |    41.616K             |    24.461G |    84.935M     |
+|   deform_align.forward_1                         |   0.454M               |   0.267T   |   1.293G       |
+|    deform_align.forward_1.proj_q.1               |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.forward_1.proj_k.1               |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.forward_1.proj_v.1               |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.forward_1.mlp.1                  |    83.376K             |    48.922G |    0.255G      |
+|    deform_align.forward_1.conv_offset            |    0.204M              |    0.12T   |    0.444G      |
+|    deform_align.forward_1.proj.1                 |    41.616K             |    24.461G |    84.935M     |
+|   deform_align.backward_2                        |   0.454M               |   0.267T   |   1.293G       |
+|    deform_align.backward_2.proj_q.1              |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.backward_2.proj_k.1              |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.backward_2.proj_v.1              |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.backward_2.mlp.1                 |    83.376K             |    48.922G |    0.255G      |
+|    deform_align.backward_2.conv_offset           |    0.204M              |    0.12T   |    0.444G      |
+|    deform_align.backward_2.proj.1                |    41.616K             |    24.461G |    84.935M     |
+|   deform_align.forward_2                         |   0.454M               |   0.267T   |   1.293G       |
+|    deform_align.forward_2.proj_q.1               |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.forward_2.proj_k.1               |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.forward_2.proj_v.1               |    41.76K              |    24.461G |    0.17G       |
+|    deform_align.forward_2.mlp.1                  |    83.376K             |    48.922G |    0.255G      |
+|    deform_align.forward_2.conv_offset            |    0.204M              |    0.12T   |    0.444G      |
+|    deform_align.forward_2.proj.1                 |    41.616K             |    24.461G |    84.935M     |
+|  reconstruction.main                             |  1.292M                |  1.043T    |  2.642G        |
+|   reconstruction.main.1                          |   0.933M               |   0.734T   |   0.113G       |
 |    reconstruction.main.1.weight                  |    (144, 720, 1, 3, 3) |            |                |
 |    reconstruction.main.1.bias                    |    (144,)              |            |                |
-|   reconstruction.main.3                          |   0.288K               |   88.474M  |   0            |
+|   reconstruction.main.3                          |   0.288K               |   0.566G   |   0            |
 |    reconstruction.main.3.weight                  |    (144,)              |            |                |
 |    reconstruction.main.3.bias                    |    (144,)              |            |                |
-|   reconstruction.main.5.0                        |   0.359M               |   48.2G    |   0.395G       |
-|    reconstruction.main.5.0.residual_group.blocks |    0.338M              |    45.652G |    0.377G      |
-|    reconstruction.main.5.0.linear                |    20.88K              |    2.548G  |    17.695M     |
-|   reconstruction.main.7                          |   0.288K               |   88.474M  |   0            |
+|   reconstruction.main.5.0                        |   0.359M               |   0.308T   |   2.529G       |
+|    reconstruction.main.5.0.residual_group.blocks |    0.338M              |    0.292T  |    2.416G      |
+|    reconstruction.main.5.0.linear                |    20.88K              |    16.307G |    0.113G      |
+|   reconstruction.main.7                          |   0.288K               |   0.566G   |   0            |
 |    reconstruction.main.7.weight                  |    (144,)              |            |                |
 |    reconstruction.main.7.bias                    |    (144,)              |            |                |
-|  conv_before_upsampler.0                         |  9.28K                 |  1.132G    |  7.864M        |
+|  conv_before_upsampler.0                         |  9.28K                 |  7.248G    |  50.332M       |
 |   conv_before_upsampler.0.weight                 |   (64, 144, 1, 1, 1)   |            |                |
 |   conv_before_upsampler.0.bias                   |   (64,)                |            |                |
-|  upsampler                                       |  0.332M                |  0.163T    |  0.283G        |
-|   upsampler.0                                    |   0.148M               |   18.119G  |   31.457M      |
+|  upsampler                                       |  0.332M                |  1.044T    |  1.812G        |
+|   upsampler.0                                    |   0.148M               |   0.116T   |   0.201G       |
 |    upsampler.0.weight                            |    (256, 64, 1, 3, 3)  |            |                |
 |    upsampler.0.bias                              |    (256,)              |            |                |
-|   upsampler.5                                    |   0.148M               |   72.478G  |   0.126G       |
+|   upsampler.5                                    |   0.148M               |   0.464T   |   0.805G       |
 |    upsampler.5.weight                            |    (256, 64, 1, 3, 3)  |            |                |
 |    upsampler.5.bias                              |    (256,)              |            |                |
-|   upsampler.10                                   |   36.928K              |   72.478G  |   0.126G       |
+|   upsampler.10                                   |   36.928K              |   0.464T   |   0.805G       |
 |    upsampler.10.weight                           |    (64, 64, 1, 3, 3)   |            |                |
 |    upsampler.10.bias                             |    (64,)               |            |                |
-|  conv_last                                       |  1.731K                |  3.397G    |  5.898M        |
+|  conv_last                                       |  1.731K                |  21.743G   |  37.749M       |
 |   conv_last.weight                               |   (3, 64, 1, 3, 3)     |            |                |
 |   conv_last.bias                                 |   (3,)                 |            |                |
-torch.Size([1, 30, 3, 256, 256])
+Output: torch.Size([1, 7, 3, 720, 1280])
 """

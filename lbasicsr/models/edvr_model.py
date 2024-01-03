@@ -1,3 +1,5 @@
+import torch
+from torch.nn.parallel import DataParallel, DistributedDataParallel
 from lbasicsr.utils import get_root_logger
 from lbasicsr.utils.registry import MODEL_REGISTRY
 from .video_base_model import VideoBaseModel
@@ -60,3 +62,42 @@ class EDVRModel(VideoBaseModel):
                     param.requires_grad = True
 
         super(EDVRModel, self).optimize_parameters(current_iter)
+
+
+@MODEL_REGISTRY.register()
+class ASEDVRModel(EDVRModel):
+    """EDVR Model + arbitrary-scale upsample
+
+    Paper: EDVR: Video Restoration with Enhanced Deformable Convolutional Networks.  # noqa: E501
+    """
+
+    def __init__(self, opt):
+        super(ASEDVRModel, self).__init__(opt)
+
+    def optimize_parameters(self, current_iter):
+        # set current scale
+        if hasattr(self, 'scale'):
+            if isinstance(self.net_g, (DataParallel, DistributedDataParallel)):
+                self.net_g.module.set_scale(self.scale)
+            else:
+                self.net_g.set_scale(self.scale)
+            print('current iteration scale: {}'.format(self.scale))
+        
+        super(ASEDVRModel, self).optimize_parameters(current_iter)
+    
+    def test(self):
+        if hasattr(self, 'net_g_ema'):
+            self.net_g_ema.eval()
+            with torch.no_grad():
+                # set network's current scale
+                if hasattr(self.net_g_ema, 'set_scale') and hasattr(self, 'scale'):
+                    self.net_g_ema.set_scale(self.scale)
+                self.output = self.net_g_ema(self.lq)
+        else:
+            self.net_g.eval()
+            with torch.no_grad():
+                # set network's current scale
+                if hasattr(self.net_g, 'set_scale') and hasattr(self, 'scale'):
+                    self.net_g.set_scale(self.scale)
+                self.output = self.net_g(self.lq)   # network influence
+            self.net_g.train()

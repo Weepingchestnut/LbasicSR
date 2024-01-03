@@ -154,13 +154,13 @@ class ASVimeo90KDataset(Vimeo90KDataset):
         super(ASVimeo90KDataset, self).__init__(opt)
 
         self.epoch = 0
-        self.init_int_scale = opt['init_int_scale']
-        self.single_scale_ft = opt['single_scale_ft']
-        self.CL_train_set = opt['CL_train_set']
-        if opt.__contains__('only_sy_scale'):
-            self.only_sy_scale = opt['only_sy_scale']
-        else:
-            self.only_sy_scale = False
+        self.init_int_scale = opt.get('init_int_scale', False)
+        self.single_scale_ft = opt.get('single_scale_ft', False)
+        self.CL_train_set = opt.get('CL_train_set', None)
+        self.only_sy_scale = opt.get('only_sy_scale', False)
+        
+        self.lq_size = opt.get('lq_size', 60)
+        self.max_scale = opt.get('max_scale', 4)
 
         if self.only_sy_scale:
             self.scale_h_list = [
@@ -230,7 +230,9 @@ class ASVimeo90KDataset(Vimeo90KDataset):
             img_gts.append(img_gt)
 
         # augmentation - flip, rotate
-        # img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
+        img_gts = single_random_crop(img_gts, 
+                                     gt_patch_size=(self.lq_size * self.max_scale, self.lq_size * self.max_scale))
+        img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
 
         img_gts = img2tensor(img_gts)  # list
         img_gts = torch.stack(img_gts, dim=0)
@@ -312,7 +314,7 @@ class ASVimeo90KRecurrentDataset(ASVimeo90KDataset):
     def __init__(self, opt):
         super(ASVimeo90KRecurrentDataset, self).__init__(opt)
 
-        self.flip_sequence = opt['flip_sequence']
+        self.flip_sequence = opt.get('flip_sequence', False)
         self.neighbor_list = [1, 2, 3, 4, 5, 6, 7]
 
     def __getitem__(self, index):
@@ -343,14 +345,18 @@ class ASVimeo90KRecurrentDataset(ASVimeo90KDataset):
         # if img_gts[0].shape != (256, 448, 3):
         #     img_gts = single_random_spcrop(img_gts, (256, 448))
         # -------------------------------------------------------
+        
+        # randomly crop
+        img_gts = single_random_crop(img_gts,
+                                     gt_patch_size=(self.lq_size * self.max_scale, self.lq_size * self.max_scale))
 
         # augmentation - flip, rotate
-        # img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
+        img_gts = augment(img_gts, self.opt['use_hflip'], self.opt['use_rot'])
 
         img_gts = img2tensor(img_gts)  # list
         img_gts = torch.stack(img_gts, dim=0)
 
-        if self.flip_sequence:  # flip the sequence: 7 frames to 14 frames
+        if self.flip_sequence:  # flip the sequence: 7 frames to 14 frames ([1, 2, 3, 4, 5, 6, 7] --> [1, 2, 3, 4, 5, 6, 7, 7, 6, 5, 4, 3, 2, 1])
             img_gts = torch.cat([img_gts, img_gts.flip(0)], dim=0)
 
         return {'gt': img_gts, 'key': key}

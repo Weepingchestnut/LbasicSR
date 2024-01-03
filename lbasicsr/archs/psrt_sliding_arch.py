@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import torch
+# torch.set_printoptions(profile="full")
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
@@ -835,7 +836,7 @@ class SwinIRFM(nn.Module):
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
-        attn_mask = compute_mask(self.num_frames, x_size, tuple(self.window_size), self.shift_size, x.device)
+        attn_mask = compute_mask(self.num_frames, x_size, tuple(self.window_size), self.shift_size, x.device)       # torch.Size([64, 192, 192])
         for layer in self.layers:
             x = layer(x.contiguous(), x_size , attn_mask)
 

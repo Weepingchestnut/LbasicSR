@@ -2,6 +2,7 @@ import torch
 from torch import nn as nn
 from torch.nn import functional as F
 
+from lbasicsr.metrics.runtime import VSR_runtime_test
 from lbasicsr.utils.registry import ARCH_REGISTRY
 from lbasicsr.archs.arch_util import ResidualBlockNoBN, flow_warp, make_layer
 from lbasicsr.archs.edvr_arch import PCDAlignment, TSAFusion
@@ -42,13 +43,13 @@ class BasicVSR(nn.Module):
         self.lrelu = nn.LeakyReLU(negative_slope=0.1, inplace=True)
 
     def get_flow(self, x):
-        b, n, c, h, w = x.size()
+        b, n, c, h, w = x.size()                            # [b, t, 3, h, w]       e.g. 0 1 2 3 4 5 6
 
-        x_1 = x[:, :-1, :, :, :].reshape(-1, c, h, w)
-        x_2 = x[:, 1:, :, :, :].reshape(-1, c, h, w)
+        x_1 = x[:, :-1, :, :, :].reshape(-1, c, h, w)       # [b*(t-1), 3, h, w]    e.g. 0 1 2 3 4 5
+        x_2 = x[:, 1:, :, :, :].reshape(-1, c, h, w)        # [b*(t-1), 3, h, w]    e.g. 1 2 3 4 5 6
 
-        flows_backward = self.spynet(x_1, x_2).view(b, n - 1, 2, h, w)
-        flows_forward = self.spynet(x_2, x_1).view(b, n - 1, 2, h, w)
+        flows_backward = self.spynet(x_1, x_2).view(b, n - 1, 2, h, w)              # ref <-- supp, 0 <-- 1
+        flows_forward = self.spynet(x_2, x_1).view(b, n - 1, 2, h, w)               # ref <-- supp, 0 --> 1
 
         return flows_forward, flows_backward
 
@@ -337,156 +338,243 @@ class EDVRFeatureExtractor(nn.Module):
 
 
 if __name__ == '__main__':
+    from torch.profiler import profile, record_function, ProfilerActivity
     from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # device = 'cpu'
 
-    # x = torch.randn(1, 3, 640, 360)
-    # x = torch.randn(1, 3, 427, 240)
-    x = torch.randn(1, 1, 3, 320, 180)
-    # x = torch.randn(1, 3, 256, 256)
-
+    scale = (4, 4)
     model = BasicVSR(
         num_feat=64,
         num_block=30
-    )
+    ).to(device)
+    # -------------------
+    # model = IconVSR(
+    #     num_feat=64,
+    #     num_block=30,
+    #     keyframe_stride=5,
+    #     temporal_padding=2
+    # ).to(device)
+    model.eval()
+    
+    input = torch.randn(1, 7, 3, 180, 320).to(device)
+    
+    # ------ torch profile -------------------------
+    with profile(
+        activities=[
+            ProfilerActivity.CPU,
+            ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+    ) as prof:
+        with record_function("model_inference"):
+            out = model(input)
+    
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    
+    # ------ Runtime ------------------------------
+    VSR_runtime_test(model, input, scale)
 
-    # print(model)
+    # ------ Parameter ----------------------------
     print(
-        "Model have {:.3f}M parameters in total".format(
-            sum(x.numel() for x in model.parameters()) / 1000000.0))
+        "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
     print(f'params: {sum(map(lambda x: x.numel(), model.parameters()))}')
-    print(flop_count_table(FlopCountAnalysis(model, x), activations=ActivationCountAnalysis(model, x)))
-
-    output = model(x)
-    print(output.shape)
+    
+    # ------ FLOPs --------------------------------
+    with torch.no_grad():
+        print('Input:', input.shape)
+        print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
+        out = model(input)
+        print('Output:', out.shape)
 
 
 """
+# BaiscVSR
+
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                        model_inference         3.72%      58.775ms        99.42%        1.571s        1.571s       0.000us         0.00%     336.607ms     336.607ms       4.07 Kb     -58.57 Kb      16.41 Gb     -14.43 Gb             1  
+                                           aten::conv2d         0.23%       3.577ms        77.11%        1.219s       1.284ms       0.000us         0.00%     246.209ms     259.440us           0 b           0 b      15.91 Gb           0 b           949  
+                                      aten::convolution         0.25%       4.015ms        76.88%        1.215s       1.280ms       0.000us         0.00%     246.209ms     259.440us           0 b           0 b      15.91 Gb           0 b           949  
+                                     aten::_convolution         0.70%      11.141ms        76.63%        1.211s       1.276ms       0.000us         0.00%     246.209ms     259.440us           0 b           0 b      15.91 Gb           0 b           949  
+                                aten::cudnn_convolution         7.08%     111.838ms        74.47%        1.177s       1.240ms     194.741ms        57.85%     194.741ms     205.207us           0 b           0 b      15.91 Gb      14.03 Gb           949  
+ampere_scudnn_winograd_128x128_ldg1_ldg4_relu_tile14...         0.00%       0.000us         0.00%       0.000us       0.000us     135.970ms        40.39%     135.970ms     157.921us           0 b           0 b           0 b           0 b           861  
+                                             aten::add_         0.63%       9.914ms         1.04%      16.359ms      17.112us      51.823ms        15.40%      51.823ms      54.208us           0 b           0 b           0 b           0 b           956  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      51.630ms        15.34%      51.630ms      52.845us           0 b           0 b           0 b           0 b           977  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      28.588ms         8.49%      28.588ms      65.121us           0 b           0 b           0 b           0 b           439  
+                                              aten::add         0.68%      10.723ms         5.90%      93.206ms     204.399us      28.329ms         8.42%      28.329ms      62.125us           0 b           0 b       5.79 Gb       5.79 Gb           456  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 1.580s
+Self CUDA time total: 336.607ms
+
+Warm up ...
+
+Testing ...
+
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████| 300/300 [01:48<00:00,  2.76it/s]
+
+Average Runtime: 361.87100290934245 ms
+
 Model have 6.291M parameters in total
 params: 6291311
-| module                                  | #parameters or shape   | #flops    | #activations   |
-|:----------------------------------------|:-----------------------|:----------|:---------------|
-| model                                   | 6.291M                 | 0.338T    | 0.589G         |
-|  spynet.basic_module                    |  1.44M                 |           |                |
-|   spynet.basic_module.0.basic_module    |   0.24M                |           |                |
-|    spynet.basic_module.0.basic_module.0 |    12.576K             |           |                |
-|    spynet.basic_module.0.basic_module.2 |    0.1M                |           |                |
-|    spynet.basic_module.0.basic_module.4 |    0.1M                |           |                |
-|    spynet.basic_module.0.basic_module.6 |    25.104K             |           |                |
-|    spynet.basic_module.0.basic_module.8 |    1.57K               |           |                |
-|   spynet.basic_module.1.basic_module    |   0.24M                |           |                |
-|    spynet.basic_module.1.basic_module.0 |    12.576K             |           |                |
-|    spynet.basic_module.1.basic_module.2 |    0.1M                |           |                |
-|    spynet.basic_module.1.basic_module.4 |    0.1M                |           |                |
-|    spynet.basic_module.1.basic_module.6 |    25.104K             |           |                |
-|    spynet.basic_module.1.basic_module.8 |    1.57K               |           |                |
-|   spynet.basic_module.2.basic_module    |   0.24M                |           |                |
-|    spynet.basic_module.2.basic_module.0 |    12.576K             |           |                |
-|    spynet.basic_module.2.basic_module.2 |    0.1M                |           |                |
-|    spynet.basic_module.2.basic_module.4 |    0.1M                |           |                |
-|    spynet.basic_module.2.basic_module.6 |    25.104K             |           |                |
-|    spynet.basic_module.2.basic_module.8 |    1.57K               |           |                |
-|   spynet.basic_module.3.basic_module    |   0.24M                |           |                |
-|    spynet.basic_module.3.basic_module.0 |    12.576K             |           |                |
-|    spynet.basic_module.3.basic_module.2 |    0.1M                |           |                |
-|    spynet.basic_module.3.basic_module.4 |    0.1M                |           |                |
-|    spynet.basic_module.3.basic_module.6 |    25.104K             |           |                |
-|    spynet.basic_module.3.basic_module.8 |    1.57K               |           |                |
-|   spynet.basic_module.4.basic_module    |   0.24M                |           |                |
-|    spynet.basic_module.4.basic_module.0 |    12.576K             |           |                |
-|    spynet.basic_module.4.basic_module.2 |    0.1M                |           |                |
-|    spynet.basic_module.4.basic_module.4 |    0.1M                |           |                |
-|    spynet.basic_module.4.basic_module.6 |    25.104K             |           |                |
-|    spynet.basic_module.4.basic_module.8 |    1.57K               |           |                |
-|   spynet.basic_module.5.basic_module    |   0.24M                |           |                |
-|    spynet.basic_module.5.basic_module.0 |    12.576K             |           |                |
-|    spynet.basic_module.5.basic_module.2 |    0.1M                |           |                |
-|    spynet.basic_module.5.basic_module.4 |    0.1M                |           |                |
-|    spynet.basic_module.5.basic_module.6 |    25.104K             |           |                |
-|    spynet.basic_module.5.basic_module.8 |    1.57K               |           |                |
-|  backward_trunk.main                    |  2.254M                |  0.13T    |  0.225G        |
-|   backward_trunk.main.0                 |   38.656K              |   2.223G  |   3.686M       |
-|    backward_trunk.main.0.weight         |    (64, 67, 3, 3)      |           |                |
-|    backward_trunk.main.0.bias           |    (64,)               |           |                |
-|   backward_trunk.main.2                 |   2.216M               |   0.127T  |   0.221G       |
-|    backward_trunk.main.2.0              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.1              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.2              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.3              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.4              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.5              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.6              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.7              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.8              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.9              |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.10             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.11             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.12             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.13             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.14             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.15             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.16             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.17             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.18             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.19             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.20             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.21             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.22             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.23             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.24             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.25             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.26             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.27             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.28             |    73.856K             |    4.247G |    7.373M      |
-|    backward_trunk.main.2.29             |    73.856K             |    4.247G |    7.373M      |
-|  forward_trunk.main                     |  2.254M                |  0.13T    |  0.225G        |
-|   forward_trunk.main.0                  |   38.656K              |   2.223G  |   3.686M       |
-|    forward_trunk.main.0.weight          |    (64, 67, 3, 3)      |           |                |
-|    forward_trunk.main.0.bias            |    (64,)               |           |                |
-|   forward_trunk.main.2                  |   2.216M               |   0.127T  |   0.221G       |
-|    forward_trunk.main.2.0               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.1               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.2               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.3               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.4               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.5               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.6               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.7               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.8               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.9               |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.10              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.11              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.12              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.13              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.14              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.15              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.16              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.17              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.18              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.19              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.20              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.21              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.22              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.23              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.24              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.25              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.26              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.27              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.28              |    73.856K             |    4.247G |    7.373M      |
-|    forward_trunk.main.2.29              |    73.856K             |    4.247G |    7.373M      |
-|  fusion                                 |  8.256K                |  0.472G   |  3.686M        |
-|   fusion.weight                         |   (64, 128, 1, 1)      |           |                |
-|   fusion.bias                           |   (64,)                |           |                |
-|  upconv1                                |  0.148M                |  8.493G   |  14.746M       |
-|   upconv1.weight                        |   (256, 64, 3, 3)      |           |                |
-|   upconv1.bias                          |   (256,)               |           |                |
-|  upconv2                                |  0.148M                |  33.974G  |  58.982M       |
-|   upconv2.weight                        |   (256, 64, 3, 3)      |           |                |
-|   upconv2.bias                          |   (256,)               |           |                |
-|  conv_hr                                |  36.928K               |  33.974G  |  58.982M       |
-|   conv_hr.weight                        |   (64, 64, 3, 3)       |           |                |
-|   conv_hr.bias                          |   (64,)                |           |                |
-|  conv_last                              |  1.731K                |  1.593G   |  2.765M        |
-|   conv_last.weight                      |   (3, 64, 3, 3)        |           |                |
-|   conv_last.bias                        |   (3,)                 |           |                |
-torch.Size([1, 1, 3, 1280, 720])
+Input: torch.Size([1, 7, 3, 180, 320])
+| module                                  | #parameters or shape   | #flops     | #activations   |
+|:----------------------------------------|:-----------------------|:-----------|:---------------|
+| model                                   | 6.291M                 | 2.6T       | 4.266G         |
+|  spynet.basic_module                    |  1.44M                 |  0.236T    |  0.143G        |
+|   spynet.basic_module.0.basic_module    |   0.24M                |   0.173G   |   0.105M       |
+|    spynet.basic_module.0.basic_module.0 |    12.576K             |    9.032M  |    23.04K      |
+|    spynet.basic_module.0.basic_module.2 |    0.1M                |    72.253M |    46.08K      |
+|    spynet.basic_module.0.basic_module.4 |    0.1M                |    72.253M |    23.04K      |
+|    spynet.basic_module.0.basic_module.6 |    25.104K             |    18.063M |    11.52K      |
+|    spynet.basic_module.0.basic_module.8 |    1.57K               |    1.129M  |    1.44K       |
+|   spynet.basic_module.1.basic_module    |   0.24M                |   0.691G   |   0.42M        |
+|    spynet.basic_module.1.basic_module.0 |    12.576K             |    36.127M |    92.16K      |
+|    spynet.basic_module.1.basic_module.2 |    0.1M                |    0.289G  |    0.184M      |
+|    spynet.basic_module.1.basic_module.4 |    0.1M                |    0.289G  |    92.16K      |
+|    spynet.basic_module.1.basic_module.6 |    25.104K             |    72.253M |    46.08K      |
+|    spynet.basic_module.1.basic_module.8 |    1.57K               |    4.516M  |    5.76K       |
+|   spynet.basic_module.2.basic_module    |   0.24M                |   2.764G   |   1.682M       |
+|    spynet.basic_module.2.basic_module.0 |    12.576K             |    0.145G  |    0.369M      |
+|    spynet.basic_module.2.basic_module.2 |    0.1M                |    1.156G  |    0.737M      |
+|    spynet.basic_module.2.basic_module.4 |    0.1M                |    1.156G  |    0.369M      |
+|    spynet.basic_module.2.basic_module.6 |    25.104K             |    0.289G  |    0.184M      |
+|    spynet.basic_module.2.basic_module.8 |    1.57K               |    18.063M |    23.04K      |
+|   spynet.basic_module.3.basic_module    |   0.24M                |   11.055G  |   6.728M       |
+|    spynet.basic_module.3.basic_module.0 |    12.576K             |    0.578G  |    1.475M      |
+|    spynet.basic_module.3.basic_module.2 |    0.1M                |    4.624G  |    2.949M      |
+|    spynet.basic_module.3.basic_module.4 |    0.1M                |    4.624G  |    1.475M      |
+|    spynet.basic_module.3.basic_module.6 |    25.104K             |    1.156G  |    0.737M      |
+|    spynet.basic_module.3.basic_module.8 |    1.57K               |    72.253M |    92.16K      |
+|   spynet.basic_module.4.basic_module    |   0.24M                |   44.219G  |   26.911M      |
+|    spynet.basic_module.4.basic_module.0 |    12.576K             |    2.312G  |    5.898M      |
+|    spynet.basic_module.4.basic_module.2 |    0.1M                |    18.497G |    11.796M     |
+|    spynet.basic_module.4.basic_module.4 |    0.1M                |    18.497G |    5.898M      |
+|    spynet.basic_module.4.basic_module.6 |    25.104K             |    4.624G  |    2.949M      |
+|    spynet.basic_module.4.basic_module.8 |    1.57K               |    0.289G  |    0.369M      |
+|   spynet.basic_module.5.basic_module    |   0.24M                |   0.177T   |   0.108G       |
+|    spynet.basic_module.5.basic_module.0 |    12.576K             |    9.248G  |    23.593M     |
+|    spynet.basic_module.5.basic_module.2 |    0.1M                |    73.988G |    47.186M     |
+|    spynet.basic_module.5.basic_module.4 |    0.1M                |    73.988G |    23.593M     |
+|    spynet.basic_module.5.basic_module.6 |    25.104K             |    18.497G |    11.796M     |
+|    spynet.basic_module.5.basic_module.8 |    1.57K               |    1.156G  |    1.475M      |
+|  backward_trunk.main                    |  2.254M                |  0.907T    |  1.574G        |
+|   backward_trunk.main.0                 |   38.656K              |   15.56G   |   25.805M      |
+|    backward_trunk.main.0.weight         |    (64, 67, 3, 3)      |            |                |
+|    backward_trunk.main.0.bias           |    (64,)               |            |                |
+|   backward_trunk.main.2                 |   2.216M               |   0.892T   |   1.548G       |
+|    backward_trunk.main.2.0              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.1              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.2              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.3              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.4              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.5              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.6              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.7              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.8              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.9              |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.10             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.11             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.12             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.13             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.14             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.15             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.16             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.17             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.18             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.19             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.20             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.21             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.22             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.23             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.24             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.25             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.26             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.27             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.28             |    73.856K             |    29.727G |    51.61M      |
+|    backward_trunk.main.2.29             |    73.856K             |    29.727G |    51.61M      |
+|  forward_trunk.main                     |  2.254M                |  0.907T    |  1.574G        |
+|   forward_trunk.main.0                  |   38.656K              |   15.56G   |   25.805M      |
+|    forward_trunk.main.0.weight          |    (64, 67, 3, 3)      |            |                |
+|    forward_trunk.main.0.bias            |    (64,)               |            |                |
+|   forward_trunk.main.2                  |   2.216M               |   0.892T   |   1.548G       |
+|    forward_trunk.main.2.0               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.1               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.2               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.3               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.4               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.5               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.6               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.7               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.8               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.9               |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.10              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.11              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.12              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.13              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.14              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.15              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.16              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.17              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.18              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.19              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.20              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.21              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.22              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.23              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.24              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.25              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.26              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.27              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.28              |    73.856K             |    29.727G |    51.61M      |
+|    forward_trunk.main.2.29              |    73.856K             |    29.727G |    51.61M      |
+|  fusion                                 |  8.256K                |  3.303G    |  25.805M       |
+|   fusion.weight                         |   (64, 128, 1, 1)      |            |                |
+|   fusion.bias                           |   (64,)                |            |                |
+|  upconv1                                |  0.148M                |  59.454G   |  0.103G        |
+|   upconv1.weight                        |   (256, 64, 3, 3)      |            |                |
+|   upconv1.bias                          |   (256,)               |            |                |
+|  upconv2                                |  0.148M                |  0.238T    |  0.413G        |
+|   upconv2.weight                        |   (256, 64, 3, 3)      |            |                |
+|   upconv2.bias                          |   (256,)               |            |                |
+|  conv_hr                                |  36.928K               |  0.238T    |  0.413G        |
+|   conv_hr.weight                        |   (64, 64, 3, 3)       |            |                |
+|   conv_hr.bias                          |   (64,)                |            |                |
+|  conv_last                              |  1.731K                |  11.148G   |  19.354M       |
+|   conv_last.weight                      |   (3, 64, 3, 3)        |            |                |
+|   conv_last.bias                        |   (3,)                 |            |                |
+Output: torch.Size([1, 7, 3, 720, 1280])
+
+# IconVSR
+
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                        model_inference        75.11%        6.295s        99.89%        8.372s        8.372s       0.000us         0.00%     523.838ms     523.838ms       4.45 Kb     -70.58 Kb      25.64 Gb     -20.78 Gb             1  
+                                           aten::conv2d         0.06%       5.321ms        16.96%        1.421s       1.117ms       0.000us         0.00%     335.720ms     263.931us           0 b           0 b      21.88 Gb           0 b          1272  
+                                      aten::convolution         0.07%       5.938ms        16.89%        1.416s       1.113ms       0.000us         0.00%     335.720ms     263.931us           0 b           0 b      21.88 Gb           0 b          1272  
+                                     aten::_convolution         0.20%      16.518ms        16.82%        1.410s       1.108ms       0.000us         0.00%     335.720ms     263.931us           0 b           0 b      21.88 Gb           0 b          1272  
+                                aten::cudnn_convolution         1.95%     163.127ms        16.24%        1.361s       1.070ms     265.398ms        50.66%     265.398ms     208.646us           0 b           0 b      21.88 Gb      18.60 Gb          1272  
+ampere_scudnn_winograd_128x128_ldg1_ldg4_relu_tile14...         0.00%       0.000us         0.00%       0.000us       0.000us     184.921ms        35.30%     184.921ms     169.964us           0 b           0 b           0 b           0 b          1088  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      72.112ms        13.77%      72.112ms      53.024us           0 b           0 b           0 b           0 b          1360  
+                                             aten::add_         0.17%      14.254ms         0.27%      22.242ms      17.390us      70.672ms        13.49%      70.672ms      55.256us           0 b           0 b           0 b           0 b          1279  
+                             torchvision::deform_conv2d         0.08%       6.770ms         0.44%      36.898ms     614.967us      26.761ms         5.11%      46.363ms     772.717us           0 b           0 b     487.79 Mb      -5.24 Gb            60  
+                                              aten::add         0.16%      13.754ms         1.33%     111.087ms     206.866us      35.067ms         6.69%      35.067ms      65.302us           0 b           0 b       7.35 Gb       7.35 Gb           537  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 8.381s
+Self CUDA time total: 523.838ms
+
+Warm up ...
+
+Testing ...
+
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████| 300/300 [02:47<00:00,  1.79it/s]
+
+Average Runtime: 558.6389986165365 ms
+
+Model have 8.695M parameters in total
+params: 8694991
+Input: torch.Size([1, 7, 3, 180, 320])
 """

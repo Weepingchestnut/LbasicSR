@@ -3,12 +3,14 @@
 # https://github.com/Mukosame/Zooming-Slow-Mo-CVPR-2020/blob/master/codes/models/modules/Sakuya_arch.py
 # '''
 import functools
+from typing import Tuple
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from lbasicsr.archs.arch_util import DCNv2Pack, ResidualBlockNoBN, make_coord, make_layer
+from lbasicsr.archs.arch_util import DCNv2Pack, ResidualBlockNoBN, make_coord, make_layer, pad_spatial
+from lbasicsr.metrics.runtime import VSR_runtime_test
 from lbasicsr.utils.registry import ARCH_REGISTRY
 
 
@@ -578,11 +580,11 @@ def warpgrid(tenInput, tenFlow):
 
 @ARCH_REGISTRY.register()
 class VideoINR(nn.Module):
-    def __init__(self, 
-                 num_feat=64, 
-                 num_frame=3, 
-                 groups=8, 
-                 front_RBs=5, 
+    def __init__(self,
+                 num_feat=64,
+                 num_frame=6,
+                 groups=8,
+                 front_RBs=5,
                  back_RBs=10):
         super(VideoINR, self).__init__()
         self.nf = num_feat
@@ -636,7 +638,7 @@ class VideoINR(nn.Module):
                                   hidden_layers=3, outermost_linear=True)
 
     def gen_feat(self, x):
-        self.inp = x
+        self.inp = x                # [bs, 2, 3, h, w]
         B, N, C, H, W = x.size()  # N input video frames
         #### extract LR features
         # L1
@@ -683,18 +685,20 @@ class VideoINR(nn.Module):
         out = self.recon_trunk(feats)
 
         ###############################################
-        out = out.view(B, T, 64, H, W)
+        out = out.view(B, T, 64, H, W)      # [bs, 3, C, h, w]
         self.feat = out
         return
 
-    def decoding(self, times=None, scale=None):
+    def decoding(self, times=None, gt_size: Tuple = (128, 128)):
         feat = torch.cat([self.feat[:, 0], self.feat[:, 1], self.feat[:, 2]], dim=1)    # [bs, 3, C, h, w] --> [bs, 3*C, 32, 32]
 
         bs, C, H, W = feat.shape
-        if isinstance(scale, int):
-            HH, WW = H * scale, W * scale
-        else:
-            HH, WW = scale[0], scale[1]
+        # if isinstance(scale, int):
+        #     HH, WW = H * scale, W * scale
+        # else:
+        #     HH, WW = scale[0], scale[1]
+        HH, WW = gt_size[0], gt_size[1]
+        
         coord_highres = make_coord((HH, WW)).repeat(bs, 1, 1).clamp(-1 + 1e-6, 1 - 1e-6).cuda()     # [bs, H*W, 2]
 
         feat_coord = make_coord(feat.shape[-2:], flatten=False).cuda() \
@@ -783,24 +787,26 @@ class VideoINR(nn.Module):
             preds.append(pred)
         return preds
 
-    def decoding_test(self, times=None, scale=None):
-        feat = torch.cat([self.feat[:, 0], self.feat[:, 1], self.feat[:, 2]], dim=1)
+    def decoding_test(self, times=None, sr_size=None):
+        feat = torch.cat([self.feat[:, 0], self.feat[:, 1], self.feat[:, 2]], dim=1)        # [bs, 3, C, h, w] --> [bs, 3C, h, w]
 
         bs, C, H, W = feat.shape
-        if isinstance(scale, int):
-            HH, WW = H * scale, W * scale
-        else:
-            HH, WW = scale[0], scale[1]
+        # if isinstance(scale, int):
+        #     HH, WW = H * scale, W * scale
+        # elif isinstance(scale, Tuple):
+        #     HH, WW = scale[0] * H, scale[1] * W
+        #     # HH, WW = scale[0], scale[1]
+        HH, WW = sr_size[0], sr_size[1]
 
-        coord_highres = make_coord((HH, WW)).repeat(bs, 1, 1).clamp(-1 + 1e-6, 1 - 1e-6).cuda()
+        coord_highres = make_coord((HH, WW)).repeat(bs, 1, 1).clamp(-1 + 1e-6, 1 - 1e-6).cuda()     # [bs, H*W, 2]
 
         feat_coord = make_coord(feat.shape[-2:], flatten=False).cuda() \
             .permute(2, 0, 1) \
-            .unsqueeze(0).expand(feat.shape[0], 2, *feat.shape[-2:])
+            .unsqueeze(0).expand(feat.shape[0], 2, *feat.shape[-2:])                                # [bs, 2, h, w]
 
         preds = []
         for c in range(len(times)):
-            qs = coord_highres.shape[1]
+            qs = coord_highres.shape[1]             # H*W
             qs1 = qs // 3
             qs2 = qs // 3
             qs3 = qs - qs1 - qs2
@@ -835,7 +841,8 @@ class VideoINR(nn.Module):
 
             HRfeat = HRfeat.permute(0, 2, 1).view(bs, 64, HH, WW)
             HRinp = self.inp.view(feat.shape[0], -1, feat.shape[2], feat.shape[3])
-            HRinp = F.upsample(HRinp, scale_factor=4, mode='bilinear')
+            # HRinp = F.upsample(HRinp, scale_factor=4, mode='bilinear')
+            HRinp = F.interpolate(HRinp, scale_factor=4, mode='bilinear')
 
             q_feat = F.grid_sample(
                 HRfeat, coord_highres.flip(-1).unsqueeze(1),
@@ -915,39 +922,97 @@ class VideoINR(nn.Module):
 
             pred = pred.permute(0, 2, 1).view(bs, 3, HH, WW)
             preds.append(pred)
-        return preds
+        return preds                # list[tensor[bs, 3, H, w], ...]
+    
 
-    def forward(self, x, times=None, scale=None, test=False):   # x: [bs, 2, 3, h, w]; times: [0.7500, 0.8750, 1.0000]; scale: [[84], [84]]
+    def forward(self, x, times=None, scale=None, gt_size=None, test=False):   # x: [bs, 2, 3, h, w]; times: [0.7500, 0.8750, 1.0000]; scale: [[84], [84]]
+        
+        # padding
+        h_input, w_input = x.shape[3:]
+        H, W = get_HW_round(h_input, w_input, scale)
+        x = pad_spatial(x, multiple=4, padding_mode='reflect')
+        
         self.gen_feat(x)
         self.inp = x
+        
         if test == True:
-            return self.decoding_test(times, scale)
+            outputs = self.decoding_test(times, (H, W))
+            return [i[..., :H, :W] for i in outputs]
         else:
-            scale = (scale[0][0], scale[1][0])      # (H, W)
-            return self.decoding(times, scale)
+            # scale = (scale[0][0], scale[1][0])      # (H, W)
+            return self.decoding(times, gt_size)
+
+
+def single_forward(model, imgs_in, space_scale, time_scale):
+    with torch.no_grad():
+        b, n, c, h, w = imgs_in.size()
+        h_n = int(4 * np.ceil(h / 4))
+        w_n = int(4 * np.ceil(w / 4))
+        imgs_temp = imgs_in.new_zeros(b, n, c, h_n, w_n)
+        imgs_temp[:, :, :, 0:h, 0:w] = imgs_in
+
+        time_Tensors = [torch.tensor([i / time_scale])[None].to(device) for i in range(time_scale)]
+        model_output = model(imgs_temp, time_Tensors, space_scale, test=True)
+        return model_output
+
+
+def get_HW_round(h, w, scale: tuple):
+    return round(h * scale[0]), round(w * scale[1])
+
+def get_HW_int(h, w, scale: tuple):
+    return int(h * scale[0]), int(w * scale[1])
+
+get_HW = get_HW_round
 
 
 if __name__ == '__main__':
+    from torch.profiler import profile, record_function, ProfilerActivity
     from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # device = 'cpu'    cuda.cpp not support cpu
     
+    scale = (3.5, 3.5)
+    time_scale = 8
     model = VideoINR(num_feat=64,
-                     num_frame=7,
+                     num_frame=6,
                      groups=8,
                      front_RBs=5,
                      back_RBs=40).to(device)
     model.eval()
+    
+    # input = torch.rand(1, 30, 3, 64, 64).to(device)
+    input = torch.rand(1, 2, 3, 128, 128).to(device)
+    
+    # ------ torch profile -------------------------
+    # with profile(
+    #     activities=[
+    #         ProfilerActivity.CPU,
+    #         ProfilerActivity.CUDA],
+    #     record_shapes=True,
+    #     profile_memory=True,
+    # ) as prof:
+    #     with record_function("model_inference"):
+    #         out = model(input)
+    
+    # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    
+    # ------ Runtime ------------------------------
+    # VSR_runtime_test(model, input, scale)
 
+    # ------ Parameter ----------------------------
     print(
         "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
-
-    input = torch.rand(1, 30, 3, 64, 64).to(device)
-    # get_flops(net, [5, 3, 180, 320])
-    # print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
-
+    print(f'params: {sum(map(lambda x: x.numel(), model.parameters()))}')
+    
+    # ------ FLOPs --------------------------------
     with torch.no_grad():
-        out = model(input)
-
-    print(out.shape)
+        print('Input:', input.shape)
+        # print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
+        # out = model(input)
+        # -->
+        time_Tensors = [torch.tensor([i / time_scale])[None].to(device) for i in range(time_scale)]
+        out = model(input, times=time_Tensors, scale=4, test=True)
+        print('Output:', out.shape)
+    
+    print('warm up ...\n')

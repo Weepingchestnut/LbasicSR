@@ -32,7 +32,7 @@ class VideoRecurrentModel(VideoBaseModel):
             normal_params = []
             flow_params = []
             for name, param in self.net_g.named_parameters():
-                if 'spynet' in name:
+                if 'spynet' in name or 'raft' in name:      # add raft
                     flow_params.append(param)
                 else:
                     normal_params.append(param)
@@ -57,7 +57,7 @@ class VideoRecurrentModel(VideoBaseModel):
             if current_iter == 1:
                 logger.info(f'Fix flow network and feature extractor for {self.fix_flow_iter} iters.')
                 for name, param in self.net_g.named_parameters():
-                    if 'spynet' in name or 'edvr' in name:
+                    if 'spynet' in name or 'raft' in name or 'edvr' in name:
                         param.requires_grad_(False)
             elif current_iter == self.fix_flow_iter:
                 logger.warning('Train all the parameters.')
@@ -264,7 +264,7 @@ class ASVideoRecurrentModel_SAM(VideoRecurrentModel):
             normal_params = []
             flow_params = []
             for name, param in self.net_g.named_parameters():
-                if 'spynet' in name:
+                if 'spynet' in name or 'raft' in name:
                     flow_params.append(param)
                 else:
                     normal_params.append(param)
@@ -296,7 +296,7 @@ class ASVideoRecurrentModel_SAM(VideoRecurrentModel):
             if current_iter == 1:
                 logger.info(f'Fix flow network and feature extractor for {self.fix_flow_iter} iters.')
                 for name, param in self.net_g.named_parameters():
-                    if 'spynet' in name or 'edvr' in name:
+                    if 'spynet' in name or 'raft' in name or 'edvr' in name:
                         param.requires_grad_(False)
             elif current_iter == self.fix_flow_iter:
                 logger.warning('Train all the parameters.')

@@ -7,6 +7,7 @@ import warnings
 from lbasicsr.archs.arch_util import flow_warp
 from lbasicsr.archs.basicvsr_arch import ConvResidualBlocks
 from lbasicsr.archs.spynet_arch import SpyNet
+from lbasicsr.metrics.runtime import VSR_runtime_test
 from lbasicsr.ops.dcn import ModulatedDeformConvPack
 from lbasicsr.utils.registry import ARCH_REGISTRY
 
@@ -409,9 +410,182 @@ class SecondOrderDeformableAlignment(ModulatedDeformConvPack):
 
 
 if __name__ == '__main__':
-    spynet_path = 'experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth'
-    model = BasicVSRPlusPlus(spynet_path=spynet_path).cuda()
-    input = torch.rand(1, 2, 3, 64, 64).cuda()
-    output = model(input)
-    print('===================')
-    print(output.shape)
+    from torch.profiler import profile, record_function, ProfilerActivity
+    from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+    
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # device = 'cpu'
+    
+    scale = (4, 4)
+    model = BasicVSRPlusPlus(
+        mid_channels=64,
+        num_blocks=7,
+        is_low_res_input=True,
+        spynet_path='experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth'
+    ).to(device)
+    
+    input = torch.rand(1, 7, 3, 180, 320).to(device)
+    
+    # ------ torch profile -------------------------
+    with profile(
+        activities=[
+            ProfilerActivity.CPU,
+            ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+    ) as prof:
+        with record_function("model_inference"):
+            out = model(input)
+    
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    
+    # ------ Runtime ------------------------------
+    VSR_runtime_test(model, input, scale)
+    
+    # ------ Parameter ----------------------------
+    print(
+        "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
+    
+    # ------ FLOPs --------------------------------
+    with torch.no_grad():
+        print('Input:', input.shape)
+        print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
+        out = model(input)
+        print('Output:', out.shape)
+
+
+"""
+test on A6000
+
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                        model_inference         4.51%      74.453ms        96.02%        1.585s        1.585s       0.000us         0.00%     432.055ms     432.055ms       4.45 Kb    -261.32 Kb      20.24 Gb     -21.50 Gb             1  
+                                           aten::conv2d         0.21%       3.545ms        74.68%        1.233s       1.782ms       0.000us         0.00%     251.474ms     363.402us           0 b           0 b      15.18 Gb           0 b           692  
+                                      aten::convolution         0.21%       3.460ms        74.47%        1.229s       1.777ms       0.000us         0.00%     251.474ms     363.402us           0 b           0 b      15.18 Gb           0 b           692  
+                                     aten::_convolution         0.64%      10.531ms        74.26%        1.226s       1.772ms       0.000us         0.00%     251.474ms     363.402us           0 b           0 b      15.18 Gb           0 b           692  
+                                aten::cudnn_convolution         5.94%      98.046ms        72.48%        1.197s       1.729ms     202.637ms        46.90%     202.637ms     292.828us           0 b           0 b      15.18 Gb       9.68 Gb           692  
+ampere_scudnn_winograd_128x128_ldg1_ldg4_relu_tile14...         0.00%       0.000us         0.00%       0.000us       0.000us      99.376ms        23.00%      99.376ms     186.097us           0 b           0 b           0 b           0 b           534  
+                             torchvision::deform_conv2d         0.22%       3.564ms         1.38%      22.710ms     946.250us      37.145ms         8.60%      59.589ms       2.483ms           0 b           0 b     337.50 Mb      -6.61 Gb            24  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      50.314ms        11.65%      50.314ms      63.209us           0 b           0 b           0 b           0 b           796  
+                                             aten::add_         0.50%       8.298ms         0.79%      12.966ms      18.549us      49.189ms        11.38%      49.189ms      70.371us           0 b           0 b           0 b           0 b           699  
+void vision::ops::(anonymous namespace)::deformable_...         0.00%       0.000us         0.00%       0.000us       0.000us      37.145ms         8.60%      37.145ms       1.548ms           0 b           0 b           0 b           0 b            24  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 1.651s
+Self CUDA time total: 432.055ms
+
+Warm up ...
+
+Testing ...
+
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████| 300/300 [02:18<00:00,  2.16it/s]
+
+Average Runtime: 461.0952089436849 ms
+
+Model have 7.323M parameters in total
+Input: torch.Size([1, 7, 3, 180, 320])
+| module                                  | #parameters or shape   | #flops     | #activations   |
+|:----------------------------------------|:-----------------------|:-----------|:---------------|
+| model                                   | 7.323M                 | 2.798T     | 4.07G          |
+|  spynet.basic_module                    |  1.44M                 |  0.236T    |  0.143G        |
+|   spynet.basic_module.0.basic_module    |   0.24M                |   0.173G   |   0.105M       |
+|    spynet.basic_module.0.basic_module.0 |    12.576K             |    9.032M  |    23.04K      |
+|    spynet.basic_module.0.basic_module.2 |    0.1M                |    72.253M |    46.08K      |
+|    spynet.basic_module.0.basic_module.4 |    0.1M                |    72.253M |    23.04K      |
+|    spynet.basic_module.0.basic_module.6 |    25.104K             |    18.063M |    11.52K      |
+|    spynet.basic_module.0.basic_module.8 |    1.57K               |    1.129M  |    1.44K       |
+|   spynet.basic_module.1.basic_module    |   0.24M                |   0.691G   |   0.42M        |
+|    spynet.basic_module.1.basic_module.0 |    12.576K             |    36.127M |    92.16K      |
+|    spynet.basic_module.1.basic_module.2 |    0.1M                |    0.289G  |    0.184M      |
+|    spynet.basic_module.1.basic_module.4 |    0.1M                |    0.289G  |    92.16K      |
+|    spynet.basic_module.1.basic_module.6 |    25.104K             |    72.253M |    46.08K      |
+|    spynet.basic_module.1.basic_module.8 |    1.57K               |    4.516M  |    5.76K       |
+|   spynet.basic_module.2.basic_module    |   0.24M                |   2.764G   |   1.682M       |
+|    spynet.basic_module.2.basic_module.0 |    12.576K             |    0.145G  |    0.369M      |
+|    spynet.basic_module.2.basic_module.2 |    0.1M                |    1.156G  |    0.737M      |
+|    spynet.basic_module.2.basic_module.4 |    0.1M                |    1.156G  |    0.369M      |
+|    spynet.basic_module.2.basic_module.6 |    25.104K             |    0.289G  |    0.184M      |
+|    spynet.basic_module.2.basic_module.8 |    1.57K               |    18.063M |    23.04K      |
+|   spynet.basic_module.3.basic_module    |   0.24M                |   11.055G  |   6.728M       |
+|    spynet.basic_module.3.basic_module.0 |    12.576K             |    0.578G  |    1.475M      |
+|    spynet.basic_module.3.basic_module.2 |    0.1M                |    4.624G  |    2.949M      |
+|    spynet.basic_module.3.basic_module.4 |    0.1M                |    4.624G  |    1.475M      |
+|    spynet.basic_module.3.basic_module.6 |    25.104K             |    1.156G  |    0.737M      |
+|    spynet.basic_module.3.basic_module.8 |    1.57K               |    72.253M |    92.16K      |
+|   spynet.basic_module.4.basic_module    |   0.24M                |   44.219G  |   26.911M      |
+|    spynet.basic_module.4.basic_module.0 |    12.576K             |    2.312G  |    5.898M      |
+|    spynet.basic_module.4.basic_module.2 |    0.1M                |    18.497G |    11.796M     |
+|    spynet.basic_module.4.basic_module.4 |    0.1M                |    18.497G |    5.898M      |
+|    spynet.basic_module.4.basic_module.6 |    25.104K             |    4.624G  |    2.949M      |
+|    spynet.basic_module.4.basic_module.8 |    1.57K               |    0.289G  |    0.369M      |
+|   spynet.basic_module.5.basic_module    |   0.24M                |   0.177T   |   0.108G       |
+|    spynet.basic_module.5.basic_module.0 |    12.576K             |    9.248G  |    23.593M     |
+|    spynet.basic_module.5.basic_module.2 |    0.1M                |    73.988G |    47.186M     |
+|    spynet.basic_module.5.basic_module.4 |    0.1M                |    73.988G |    23.593M     |
+|    spynet.basic_module.5.basic_module.6 |    25.104K             |    18.497G |    11.796M     |
+|    spynet.basic_module.5.basic_module.8 |    1.57K               |    1.156G  |    1.475M      |
+|  feat_extract.main                      |  0.371M                |  0.149T    |  0.284G        |
+|   feat_extract.main.0                   |   1.792K               |   0.697G   |   25.805M      |
+|    feat_extract.main.0.weight           |    (64, 3, 3, 3)       |            |                |
+|    feat_extract.main.0.bias             |    (64,)               |            |                |
+|   feat_extract.main.2                   |   0.369M               |   0.149T   |   0.258G       |
+|    feat_extract.main.2.0                |    73.856K             |    29.727G |    51.61M      |
+|    feat_extract.main.2.1                |    73.856K             |    29.727G |    51.61M      |
+|    feat_extract.main.2.2                |    73.856K             |    29.727G |    51.61M      |
+|    feat_extract.main.2.3                |    73.856K             |    29.727G |    51.61M      |
+|    feat_extract.main.2.4                |    73.856K             |    29.727G |    51.61M      |
+|  deform_align                           |  2.039M                |  0.602T    |  0.863G        |
+|   deform_align.backward_1               |   0.51M                |   0.15T    |   0.216G       |
+|    deform_align.backward_1.weight       |    (64, 128, 3, 3)     |            |                |
+|    deform_align.backward_1.bias         |    (64,)               |            |                |
+|    deform_align.backward_1.conv_offset  |    0.436M              |    0.15T   |    0.216G      |
+|   deform_align.forward_1                |   0.51M                |   0.15T    |   0.216G       |
+|    deform_align.forward_1.weight        |    (64, 128, 3, 3)     |            |                |
+|    deform_align.forward_1.bias          |    (64,)               |            |                |
+|    deform_align.forward_1.conv_offset   |    0.436M              |    0.15T   |    0.216G      |
+|   deform_align.backward_2               |   0.51M                |   0.15T    |   0.216G       |
+|    deform_align.backward_2.weight       |    (64, 128, 3, 3)     |            |                |
+|    deform_align.backward_2.bias         |    (64,)               |            |                |
+|    deform_align.backward_2.conv_offset  |    0.436M              |    0.15T   |    0.216G      |
+|   deform_align.forward_2                |   0.51M                |   0.15T    |   0.216G       |
+|    deform_align.forward_2.weight        |    (64, 128, 3, 3)     |            |                |
+|    deform_align.forward_2.bias          |    (64,)               |            |                |
+|    deform_align.forward_2.conv_offset   |    0.436M              |    0.15T   |    0.216G      |
+|  backbone                               |  2.584M                |  1.04T     |  1.548G        |
+|   backbone.backward_1.main              |   0.591M               |   0.238T   |   0.387G       |
+|    backbone.backward_1.main.0           |    73.792K             |    29.727G |    25.805M     |
+|    backbone.backward_1.main.2           |    0.517M              |    0.208T  |    0.361G      |
+|   backbone.forward_1.main               |   0.628M               |   0.253T   |   0.387G       |
+|    backbone.forward_1.main.0            |    0.111M              |    44.591G |    25.805M     |
+|    backbone.forward_1.main.2            |    0.517M              |    0.208T  |    0.361G      |
+|   backbone.backward_2.main              |   0.665M               |   0.268T   |   0.387G       |
+|    backbone.backward_2.main.0           |    0.148M              |    59.454G |    25.805M     |
+|    backbone.backward_2.main.2           |    0.517M              |    0.208T  |    0.361G      |
+|   backbone.forward_2.main               |   0.701M               |   0.282T   |   0.387G       |
+|    backbone.forward_2.main.0            |    0.184M              |    74.318G |    25.805M     |
+|    backbone.forward_2.main.2            |    0.517M              |    0.208T  |    0.361G      |
+|  reconstruction.main                    |  0.554M                |  0.223T    |  0.284G        |
+|   reconstruction.main.0                 |   0.184M               |   74.318G  |   25.805M      |
+|    reconstruction.main.0.weight         |    (64, 320, 3, 3)     |            |                |
+|    reconstruction.main.0.bias           |    (64,)               |            |                |
+|   reconstruction.main.2                 |   0.369M               |   0.149T   |   0.258G       |
+|    reconstruction.main.2.0              |    73.856K             |    29.727G |    51.61M      |
+|    reconstruction.main.2.1              |    73.856K             |    29.727G |    51.61M      |
+|    reconstruction.main.2.2              |    73.856K             |    29.727G |    51.61M      |
+|    reconstruction.main.2.3              |    73.856K             |    29.727G |    51.61M      |
+|    reconstruction.main.2.4              |    73.856K             |    29.727G |    51.61M      |
+|  upconv1                                |  0.148M                |  59.454G   |  0.103G        |
+|   upconv1.weight                        |   (256, 64, 3, 3)      |            |                |
+|   upconv1.bias                          |   (256,)               |            |                |
+|  upconv2                                |  0.148M                |  0.238T    |  0.413G        |
+|   upconv2.weight                        |   (256, 64, 3, 3)      |            |                |
+|   upconv2.bias                          |   (256,)               |            |                |
+|  conv_hr                                |  36.928K               |  0.238T    |  0.413G        |
+|   conv_hr.weight                        |   (64, 64, 3, 3)       |            |                |
+|   conv_hr.bias                          |   (64,)                |            |                |
+|  conv_last                              |  1.731K                |  11.148G   |  19.354M       |
+|   conv_last.weight                      |   (3, 64, 3, 3)        |            |                |
+|   conv_last.bias                        |   (3,)                 |            |                |
+|  img_upsample                           |                        |  77.414M   |  0             |
+Output: torch.Size([1, 7, 3, 720, 1280])
+"""

@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 from lbasicsr.metrics.flops import get_flops
+from lbasicsr.metrics.runtime import VSR_runtime_test
 from lbasicsr.utils.registry import ARCH_REGISTRY
 
 
@@ -105,7 +106,7 @@ class UNIT(nn.Module):
         return it_sr, ht
 
 
-@ARCH_REGISTRY.register()
+# @ARCH_REGISTRY.register()
 class OVSR(nn.Module):
     def __init__(self, num_feat=56, num_pb=4, num_sb=2, scale=4, num_frame=3, kind='global'):
         super(OVSR, self).__init__()
@@ -162,10 +163,15 @@ class OVSR(nn.Module):
         sr_all = torch.stack(sr_all, 1)[:, start:]
         pre_sr_all = torch.stack(pre_sr_all, 1)[:, start:end]
 
-        return sr_all, pre_sr_all
+        # return sr_all, pre_sr_all
+        # for influence test
+        return sr_all
 
 
 if __name__ == '__main__':
+    from torch.profiler import profile, record_function, ProfilerActivity
+    from fvcore.nn import flop_count_table, FlopCountAnalysis, ActivationCountAnalysis
+    
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # GOVSR-8+4-56 -------------------
@@ -176,19 +182,118 @@ if __name__ == '__main__':
     #     scale=4,
     #     num_frame=5).to(device)
     # GOVSR-8+4-80 -------------------
-    net = OVSR(
+    scale = (4, 4)
+    model = OVSR(
         num_feat=80,
         num_pb=8,
         num_sb=4,
         scale=4,
-        num_frame=5).to(device)
-    net.eval()
+        num_frame=3).to(device)
+    model.eval()
+    
+    input = torch.rand(1, 7, 3, 180, 320).to(device)
+    # input = torch.rand(1, 9, 3, 64, 64).to(device)
+    
+    # ------ torch profile -------------------------
+    with profile(
+        activities=[
+            ProfilerActivity.CPU,
+            ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+    ) as prof:
+        with record_function("model_inference"):
+            out = model(input)
+    
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    
+    # ------ Runtime ------------------------------
+    VSR_runtime_test(model, input, scale)
+    
+    # ------ Parameter ----------------------------
+    print(
+        "Model have {:.3f}M parameters in total".format(sum(x.numel() for x in model.parameters()) / 1000000.0))
 
-    input = torch.rand(1, 9, 3, 64, 64).to(device)
-    # get_flops(net, [9, 3, 180, 320])
-
+    # ------ FLOPs --------------------------------
     with torch.no_grad():
-        out = net(input)[0]
+        print('Input:', input.shape)
+        print(flop_count_table(FlopCountAnalysis(model, input), activations=ActivationCountAnalysis(model, input)))
+        out = model(input)
+        print('Output:', out.shape)
 
-    if isinstance(out, torch.Tensor):
-        print(out.shape)
+
+"""
+# GOVSR-8+4-80
+
+precursor 8
+successor 4
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg       CPU Mem  Self CPU Mem      CUDA Mem  Self CUDA Mem    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                        model_inference         2.91%      46.688ms        99.99%        1.602s        1.602s       0.000us         0.00%     363.550ms     363.550ms          -4 b        -468 b      29.64 Gb      -1.13 Gb             1  
+                                           aten::conv2d         0.17%       2.682ms        87.24%        1.398s       2.102ms       0.000us         0.00%     257.541ms     387.280us           0 b           0 b      11.48 Gb           0 b           665  
+                                      aten::convolution         0.20%       3.143ms        87.08%        1.395s       2.098ms       0.000us         0.00%     257.541ms     387.280us           0 b           0 b      11.48 Gb           0 b           665  
+                                     aten::_convolution         0.69%      11.027ms        86.88%        1.392s       2.093ms       0.000us         0.00%     257.541ms     387.280us           0 b           0 b      11.48 Gb           0 b           665  
+                                aten::cudnn_convolution         6.11%      97.924ms        85.15%        1.364s       2.052ms     220.929ms        60.77%     220.929ms     332.224us           0 b           0 b      11.48 Gb       1.62 Gb           665  
+sm80_xmma_fprop_implicit_gemm_tf32f32_tf32f32_f32_nh...         0.00%       0.000us         0.00%       0.000us       0.000us      94.321ms        25.94%      94.321ms     354.590us           0 b           0 b           0 b           0 b           266  
+ampere_scudnn_winograd_128x128_ldg1_ldg4_relu_tile14...         0.00%       0.000us         0.00%       0.000us       0.000us      71.954ms        19.79%      71.954ms     250.711us           0 b           0 b           0 b           0 b           287  
+                                              aten::cat         0.17%       2.711ms         6.36%     101.933ms     273.279us       0.000us         0.00%      47.716ms     127.925us           0 b           0 b      14.42 Gb           0 b           373  
+                                             aten::_cat         0.37%       5.984ms         6.19%      99.222ms     266.011us      47.716ms        13.13%      47.716ms     127.925us           0 b           0 b      14.42 Gb           0 b           373  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us      47.206ms        12.98%      47.206ms     127.240us           0 b           0 b           0 b           0 b           371  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 1.602s
+Self CUDA time total: 363.550ms
+
+Warm up ...
+
+Testing ...
+
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 300/300 [01:52<00:00,  2.66it/s]
+
+Average Runtime: 375.496 ms
+
+Model have 7.062M parameters in total
+Input: torch.Size([1, 7, 3, 180, 320])
+| module                       | #parameters or shape   | #flops     | #activations   |
+|:-----------------------------|:-----------------------|:-----------|:---------------|
+| model                        | 7.062M                 | 2.847T     | 3.013G         |
+|  precursor                   |  4.521M                |  1.822T    |  1.942G        |
+|   precursor.conv_c           |   2.24K                |   0.871G   |   32.256M      |
+|    precursor.conv_c.weight   |    (80, 3, 3, 3)       |            |                |
+|    precursor.conv_c.bias     |    (80,)               |            |                |
+|   precursor.conv_sup         |   4.4K                 |   1.742G   |   32.256M      |
+|    precursor.conv_sup.weight |    (80, 6, 3, 3)       |            |                |
+|    precursor.conv_sup.bias   |    (80,)               |            |                |
+|   precursor.blocks           |   4.305M               |   1.734T   |   1.806G       |
+|    precursor.blocks.0        |    0.538M              |    0.217T  |    0.226G      |
+|    precursor.blocks.1        |    0.538M              |    0.217T  |    0.226G      |
+|    precursor.blocks.2        |    0.538M              |    0.217T  |    0.226G      |
+|    precursor.blocks.3        |    0.538M              |    0.217T  |    0.226G      |
+|    precursor.blocks.4        |    0.538M              |    0.217T  |    0.226G      |
+|    precursor.blocks.5        |    0.538M              |    0.217T  |    0.226G      |
+|    precursor.blocks.6        |    0.538M              |    0.217T  |    0.226G      |
+|    precursor.blocks.7        |    0.538M              |    0.217T  |    0.226G      |
+|   precursor.merge            |   0.173M               |   69.673G  |   32.256M      |
+|    precursor.merge.weight    |    (80, 240, 3, 3)     |            |                |
+|    precursor.merge.bias      |    (80,)               |            |                |
+|   precursor.upscale.body     |   35.916K              |   16.025G  |   38.707M      |
+|    precursor.upscale.body.0  |    34.608K             |    13.935G |    19.354M     |
+|    precursor.upscale.body.3  |    1.308K              |    2.09G   |    19.354M     |
+|  successor                   |  2.541M                |  1.025T    |  1.071G        |
+|   successor.conv_c           |   0.18M                |   72.286G  |   96.768M      |
+|    successor.conv_c.0        |    59.84K              |    24.095G |    32.256M     |
+|    successor.conv_c.1        |    59.84K              |    24.095G |    32.256M     |
+|    successor.conv_c.2        |    59.84K              |    24.095G |    32.256M     |
+|   successor.blocks           |   2.153M               |   0.867T   |   0.903G       |
+|    successor.blocks.0        |    0.538M              |    0.217T  |    0.226G      |
+|    successor.blocks.1        |    0.538M              |    0.217T  |    0.226G      |
+|    successor.blocks.2        |    0.538M              |    0.217T  |    0.226G      |
+|    successor.blocks.3        |    0.538M              |    0.217T  |    0.226G      |
+|   successor.merge            |   0.173M               |   69.673G  |   32.256M      |
+|    successor.merge.weight    |    (80, 240, 3, 3)     |            |                |
+|    successor.merge.bias      |    (80,)               |            |                |
+|   successor.upscale.body     |   35.916K              |   16.025G  |   38.707M      |
+|    successor.upscale.body.0  |    34.608K             |    13.935G |    19.354M     |
+|    successor.upscale.body.3  |    1.308K              |    2.09G   |    19.354M     |
+Output: torch.Size([1, 7, 3, 720, 1280])
+"""

@@ -1,12 +1,20 @@
+from distutils.version import LooseVersion
 import cv2
 import math
 import numpy as np
 import random
 import torch
+import torchvision
 from scipy import special
 from scipy.stats import multivariate_normal
 import torch.nn as nn
-from torchvision.transforms.functional_tensor import rgb_to_grayscale
+
+if LooseVersion(torchvision.__version__) >= LooseVersion('0.15.0'):
+    from torchvision.transforms.functional import rgb_to_grayscale
+else:
+    from torchvision.transforms.functional_tensor import rgb_to_grayscale
+# ------ for torch>=2.0.1 -------------------------------------
+# from torchvision.transforms.functional import rgb_to_grayscale
 
 # -------------------------------------------------------------------- #
 # --------------------------- blur kernels --------------------------- #
