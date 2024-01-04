@@ -8,9 +8,9 @@ datasets:
   test:
     name: REDS4
     type: VideoTestDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/REDS/train_sharp
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/REDS/train_sharp_bicubic/X4
-    meta_info_file: /data2/lzk_data/workspace/LbasicSR/lbasicsr/data/meta_info/meta_info_REDS4_test_GT.txt
+    dataroot_gt: datasets/REDS/train_sharp
+    dataroot_lq: datasets/REDS/train_sharp_bicubic
+    meta_info_file: lbasicsr/data/meta_info/meta_info_REDS4_test_GT.txt
     io_backend:
       type: disk
 
@@ -35,7 +35,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/EDVR/EDVR_L_x4_SR_REDS_official-9f5f5039.pth
+  pretrain_network_g: pretrained_models/EDVR/EDVR_L_x4_SR_REDS_official-9f5f5039.pth
   strict_load_g: true
 
 # validation settings
@@ -46,5 +46,9 @@ val:
   metrics:
     psnr: # metric name, can be arbitrary
       type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
       crop_border: 0
       test_y_channel: false

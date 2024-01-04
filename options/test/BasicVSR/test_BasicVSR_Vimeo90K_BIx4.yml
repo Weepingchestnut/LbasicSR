@@ -8,10 +8,9 @@ datasets:
   test_1:  # the 1st test dataset
     name: Vimeo90K
     type: VideoTestVimeo90KDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/vimeo90k/vimeo_septuplet/sequences
-#    dataroot_lq: datasets/vimeo90k/BIx4
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/vimeo90k/vimeo_septuplet/sequences_LR/sequencestest
-    meta_info_file: /data2/lzk_data/workspace/LbasicSR/lbasicsr/data/meta_info/meta_info_Vimeo90K_test_GT.txt
+    dataroot_gt: datasets/vimeo90k/vimeo_septuplet/sequences
+    dataroot_lq: datasets/vimeo90k/BIx4
+    meta_info_file: lbasicsr/data/meta_info/meta_info_Vimeo90K_test_GT.txt
     cache_data: false
     io_backend:
       type: disk
@@ -23,11 +22,11 @@ network_g:
   type: BasicVSR
   num_feat: 64
   num_block: 30
-  spynet_path: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  spynet_path: experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
 
 # path
 path:
-  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/BasicVSR/BasicVSR_Vimeo90K_BIx4-2a29695a.pth
+  pretrain_network_g: experiments/pretrained_models/BasicVSR/BasicVSR_Vimeo90K_BIx4-2a29695a.pth
   strict_load_g: true
 
 # validation settings

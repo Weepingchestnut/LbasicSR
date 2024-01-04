@@ -1,0 +1,54 @@
+name: VRT_Vimeo90K_BIx4
+model_type: VRTModel
+scale: 4
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+datasets:
+  test_2:
+    name: Vid4
+    type: VideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
+    cache_data: true
+    io_backend:
+      type: disk
+    num_frame: -1
+
+# network structures
+network_g:
+  type: VRT
+  upscale: 4
+  img_size: [8, 64, 64]
+  window_size: [8, 8, 8]
+  depths: [8, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4]
+  indep_reconsts: [11, 12]
+  embed_dims: [120, 120, 120, 120, 120, 120, 120, 180, 180, 180, 180, 180, 180]
+  num_heads: [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+  spynet_path: experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  pa_frames: 4
+  deformable_groups: 16
+
+# path
+path:
+  pretrain_network_g: experiments/pretrained_models/VRT/003_VRT_videosr_bi_Vimeo_7frames.pth
+  strict_load_g: true
+
+# validation settings
+val:
+  val_freq: !!float 5e3
+  save_img: false
+
+  num_frame_testing: 32
+  num_frame_overlapping: 2
+  size_patch_testing: 128
+
+  metrics:
+    psnr_y: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: true
+    ssim_y: # metric name, can be arbitrary
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: true

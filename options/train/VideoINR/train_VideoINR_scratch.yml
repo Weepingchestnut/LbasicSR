@@ -1,0 +1,149 @@
+# general settings
+name: VideoINR_scratch_b16p32f5b40n7l1_600k_Vimeo
+model_type: VideoINRModel
+# scale: 4
+num_gpu: 2  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: Adobe240
+    type: ASAdobe240Dataset     # [Adobe240Dataset, ASAdobe240Dataset]
+    dataroot_gt: datasets/adobe240/frame/train
+    dataroot_lq: datasets/adobe240/frame/train
+    cache_keys: lbasicsr/data/meta_info/Vimeo7_train_keys.pkl
+    meta_info_file: lbasicsr/data/meta_info/adobe240fps_folder_train.txt
+    io_backend:
+      type: disk
+    
+    num_frame: 7
+    gt_size: 128                # Adobe240Dataset need
+    lq_size: 32                 # stage1: 32, stage2: 64
+    scale: 4                    # stage1 scale
+    interval_list: [1]
+    random_reverse: true
+    border_mode: false
+    use_hflip: true
+    use_rot: true
+    flip_sequence: false
+
+    # data loader
+    num_worker_per_gpu: 8
+    batch_size_per_gpu: 16        # official: 24
+    dataset_enlarge_ratio: 1      # must 1 for two-stage training
+    prefetch_mode: ~
+  
+  val_x4:
+    name: Vid4_x4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/arbitrary_scale_BI/x4    # not needed
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [4, 4]
+    downsampling_mode: torch
+  
+  val_x3:
+    name: Vid4_x3
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/arbitrary_scale_BI/x4    # not needed
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [3, 3]
+    downsampling_mode: torch
+  
+  val_x2:
+    name: Vid4_x2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/arbitrary_scale_BI/x4    # not needed
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [2, 2]
+    downsampling_mode: torch
+
+# network structures
+network_g:
+  type: VideoINR # LunaTokis & LIIF
+  num_feat: 64
+  num_frame: 7
+  groups: 8
+  front_RBs: 5
+  # mid_RBs: 0
+  back_RBs: 40
+  # HR_in: false
+
+# path
+path:
+  pretrain_network_g: ~
+  strict_load_g: false
+  resume_state: experiments/VideoINR_scratch_b16p32f5b40n7l1_600k_Vimeo/training_states/250000.state
+
+# training settings
+train:
+  optim_g:
+    type: Adam
+    lr: !!float 1e-4
+    weight_decay: 0
+    betas: [0.9, 0.99]
+  
+  scheduler:
+    type: CosineAnnealingRestartLR
+    periods: [150000, 300000, 450000]
+    restart_weights: [1, 1, 1]
+    eta_min: !!float 1e-7
+  
+  total_iter: 600000
+  warmup_iter: -1  # no warm up
+  stage_division: 450000
+
+  # losses
+  pixel_opt:
+    type: CharbonnierLoss
+    loss_weight: 1.0
+    reduction: mean
+
+# validation settings
+val:
+  val_freq: !!float 5e3
+  save_img: false
+
+  metrics:
+    psnr_y: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: true
+    ssim_y: # metric name, can be arbitrary
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: true
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: !!float 5e3
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500
+
+find_unused_parameters: true

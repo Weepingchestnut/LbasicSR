@@ -8,8 +8,8 @@ datasets:
   test_1:  # the 1st test dataset
     name: REDS4
     type: VideoRecurrentTestDataset
-    dataroot_gt: /data2/lzk_data/workspace/LbasicSR/datasets/REDS4/GT
-    dataroot_lq: /data2/lzk_data/workspace/LbasicSR/datasets/REDS4/sharp_bicubic
+    dataroot_gt: datasets/REDS4/GT
+    dataroot_lq: datasets/REDS4/sharp_bicubic
     cache_data: True
     io_backend:
       type: disk
@@ -20,11 +20,11 @@ network_g:
   type: BasicVSR
   num_feat: 64
   num_block: 30
-  spynet_path: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  spynet_path: experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
 
 # path
 path:
-  pretrain_network_g: /data2/lzk_data/workspace/LbasicSR/experiments/pretrained_models/BasicVSR/BasicVSR_REDS4-543c8261.pth
+  pretrain_network_g: experiments/pretrained_models/BasicVSR/BasicVSR_REDS4-543c8261.pth
   strict_load_g: true
 
 # validation settings

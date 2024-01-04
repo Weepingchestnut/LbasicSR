@@ -1,0 +1,638 @@
+name: VRT_Vimeo90K_UDM10_asBI
+model_type: VRTModel
+# scale: 4
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+datasets:
+  # ====== x4 ~ x3.1 =====================================
+  test_01:  # the 1st test dataset
+    name: UDM10_x4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [4, 4]
+    downsampling_mode: torch
+
+  test_02: # the 1st test dataset
+    name: UDM10_x3.9
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [3.9, 3.9]
+    downsampling_mode: torch
+
+  test_03: # the 1st test dataset
+    name: UDM10_x3.8
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.8, 3.8 ]
+    downsampling_mode: torch
+
+  test_04: # the 1st test dataset
+    name: UDM10_x3.7
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.7, 3.7 ]
+    downsampling_mode: torch
+
+  test_05: # the 1st test dataset
+    name: UDM10_x3.6
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.6, 3.6 ]
+    downsampling_mode: torch
+
+  test_06: # the 1st test dataset
+    name: UDM10_x3.5
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.5, 3.5 ]
+    downsampling_mode: torch
+
+  test_07: # the 1st test dataset
+    name: UDM10_x3.4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.4, 3.4 ]
+    downsampling_mode: torch
+
+  test_08: # the 1st test dataset
+    name: UDM10_x3.3
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.3, 3.3 ]
+    downsampling_mode: torch
+
+  test_09: # the 1st test dataset
+    name: UDM10_x3.2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.2, 3.2 ]
+    downsampling_mode: torch
+
+  test_10: # the 1st test dataset
+    name: UDM10_x3.1
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.1, 3.1 ]
+    downsampling_mode: torch
+  
+  # ====== x3 ~ x2.1 ======================================
+  test_11: # the 1st test dataset
+    name: UDM10_x3
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3, 3 ]
+    downsampling_mode: torch
+  
+  test_12: # the 1st test dataset
+    name: UDM10_x2.9
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.9, 2.9 ]
+    downsampling_mode: torch
+  
+  test_13: # the 1st test dataset
+    name: UDM10_x2.8
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.8, 2.8 ]
+    downsampling_mode: torch
+  
+  test_14: # the 1st test dataset
+    name: UDM10_x2.7
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.7, 2.7 ]
+    downsampling_mode: torch
+  
+  test_15: # the 1st test dataset
+    name: UDM10_x2.6
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.6, 2.6 ]
+    downsampling_mode: torch
+  
+  test_16: # the 1st test dataset
+    name: UDM10_x2.5
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.5, 2.5 ]
+    downsampling_mode: torch
+  
+  test_17: # the 1st test dataset
+    name: UDM10_x2.4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.4, 2.4 ]
+    downsampling_mode: torch
+  
+  test_18: # the 1st test dataset
+    name: UDM10_x2.3
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.3, 2.3 ]
+    downsampling_mode: torch
+  
+  test_19: # the 1st test dataset
+    name: UDM10_x2.2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.2, 2.2 ]
+    downsampling_mode: torch
+  
+  test_20: # the 1st test dataset
+    name: UDM10_x2.1
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.1, 2.1 ]
+    downsampling_mode: torch
+  
+  # ====== x2 ~ x1.1 =========================================
+  test_21: # the 1st test dataset
+    name: UDM10_x2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2, 2 ]
+    downsampling_mode: torch
+  
+  test_22: # the 1st test dataset
+    name: UDM10_x1.9
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.9, 1.9 ]
+    downsampling_mode: torch
+  
+  test_23: # the 1st test dataset
+    name: UDM10_x1.8
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.8, 1.8 ]
+    downsampling_mode: torch
+  
+  test_24: # the 1st test dataset
+    name: UDM10_x1.7
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.7, 1.7 ]
+    downsampling_mode: torch
+  
+  test_25: # the 1st test dataset
+    name: UDM10_x1.6
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.6, 1.6 ]
+    downsampling_mode: torch
+  
+  test_26: # the 1st test dataset
+    name: UDM10_x1.5
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.5, 1.5 ]
+    downsampling_mode: torch
+  
+  test_27: # the 1st test dataset
+    name: UDM10_x1.4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.4, 1.4 ]
+    downsampling_mode: torch
+  
+  test_28: # the 1st test dataset
+    name: UDM10_x1.3
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.3, 1.3 ]
+    downsampling_mode: torch
+  
+  test_29: # the 1st test dataset
+    name: UDM10_x1.2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.2, 1.2 ]
+    downsampling_mode: torch
+  
+  test_30: # the 1st test dataset
+    name: UDM10_x1.1
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.1, 1.1 ]
+    downsampling_mode: torch
+  
+  test_31: # the 1st test dataset
+    name: UDM10_x1.5_x4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.5, 4 ]
+    downsampling_mode: torch
+  
+  test_32: # the 1st test dataset
+    name: UDM10_x2_x4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2, 4 ]
+    downsampling_mode: torch
+  
+  test_33: # the 1st test dataset
+    name: UDM10_x2_x3.75
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2, 3.75 ]
+    downsampling_mode: torch
+  
+  test_34: # the 1st test dataset
+    name: UDM10_x1.5_x3.5
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.5, 3.5 ]
+    downsampling_mode: torch
+  
+  test_35: # the 1st test dataset
+    name: UDM10_x1.6_x3.05
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.6, 3.05 ]
+    downsampling_mode: torch
+  
+  test_36: # the 1st test dataset
+    name: UDM10_x1.7_x3.75
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 1.7, 3.75 ]
+    downsampling_mode: torch
+  
+  test_37: # the 1st test dataset
+    name: UDM10_x2.95_x3.75
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 2.95, 3.75 ]
+    downsampling_mode: torch
+  
+  test_38: # the 1st test dataset
+    name: UDM10_x3.9_x2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.9, 2 ]
+    downsampling_mode: torch
+  
+  test_39: # the 1st test dataset
+    name: UDM10_x3.5_x1.5
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.5, 1.5 ]
+    downsampling_mode: torch
+  
+  test_40: # the 1st test dataset
+    name: UDM10_x3.5_x2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.5, 2 ]
+    downsampling_mode: torch
+  
+  test_41: # the 1st test dataset
+    name: UDM10_x3.5_x1.75
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 3.5, 1.75 ]
+    downsampling_mode: torch
+  
+  test_42: # the 1st test dataset
+    name: UDM10_x4_x1.4
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/UDM10/GT
+    dataroot_lq: datasets/UDM10/BIx4
+    cache_data: false
+    io_backend:
+      type: disk
+    num_frame: -1
+    # arbitrary scale setting
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [ 4, 1.4 ]
+    downsampling_mode: torch
+
+# network structures
+network_g:
+  type: VRT
+  upscale: 4
+  img_size: [8, 64, 64]
+  window_size: [8, 8, 8]
+  depths: [8, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4]
+  indep_reconsts: [11, 12]
+  embed_dims: [120, 120, 120, 120, 120, 120, 120, 180, 180, 180, 180, 180, 180]
+  num_heads: [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+  # spynet_path: experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  pa_frames: 4
+  deformable_groups: 16
+
+# path
+path:
+  pretrain_network_g: experiments/pretrained_models/VRT/003_VRT_videosr_bi_Vimeo_7frames.pth
+  strict_load_g: true
+
+# validation settings
+val:
+  val_freq: !!float 5e3
+  save_img: true
+
+  num_frame_testing: 32
+  num_frame_overlapping: 2
+  size_patch_testing: 64    # official 128
+
+  metrics:
+    psnr_y: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: true
+    ssim_y: # metric name, can be arbitrary
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: true
+
+# official
+# python main_test_vrt.py --task 003_VRT_videosr_bi_Vimeo_7frames --folder_lq testsets/Vid4/BIx4 --folder_gt testsets/Vid4/GT --tile 32 128 128 --tile_overlap 2 20 20

@@ -10,11 +10,21 @@ datasets:
     type: VideoTestVimeo90KDataset
     dataroot_gt: datasets/vimeo90k/vimeo_septuplet/sequences
     dataroot_lq: datasets/vimeo90k/BIx4
-    meta_info_file: basicsr/data/meta_info/meta_info_Vimeo90K_test_GT.txt
+    meta_info_file: lbasicsr/data/meta_info/meta_info_Vimeo90K_test_GT.txt
     cache_data: false
     io_backend:
       type: disk
     num_frame: 7
+
+  test_2: # the 1st test dataset
+    name: Vid4
+    type: VideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
+    cache_data: true
+    io_backend:
+      type: disk
+    num_frame: -1
 
 
 # network structures

@@ -1,0 +1,126 @@
+# general settings
+name: VRT_Vimeo90K_BIx4
+model_type: VRTModel
+scale: 4
+num_gpu: auto  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: Vimeo90K
+    type: Vimeo90KRecurrentDataset
+    dataroot_gt: datasets/vimeo90k/vimeo_septuplet/sequences
+    dataroot_lq: datasets/vimeo90k/vimeo_septuplet_matlabLRx4/sequences
+    meta_info_file: lbasicsr/data/meta_info/meta_info_Vimeo90K_train_GT.txt
+    io_backend:
+      type: disk
+
+    num_frame: 7
+    gt_size: 256      # default 256
+    interval_list: [1]
+    random_reverse: true
+    use_hflip: true
+    use_rot: true
+    flip_sequence: false    # flip the sequence: 7 frames to 14 frames
+
+    # data loader
+    num_worker_per_gpu: 6
+    batch_size_per_gpu: 1         # for 2 A6000: 1
+    dataset_enlarge_ratio: 200
+    prefetch_mode: ~
+
+  val:
+    name: Vid4
+    type: VideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
+
+    cache_data: True
+    io_backend:
+      type: disk
+
+    num_frame: -1  # not needed
+
+# network structures
+network_g:
+  type: VRT
+  upscale: 4
+  img_size: [8, 64, 64]
+  window_size: [8, 8, 8]
+  depths: [8, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4]
+  indep_reconsts: [11, 12]
+  embed_dims: [120, 120, 120, 120, 120, 120, 120, 180, 180, 180, 180, 180, 180]
+  num_heads: [6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6]
+  spynet_path: experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  pa_frames: 4
+  deformable_groups: 16
+
+# path
+path:
+  pretrain_network_g: ~     # experiments/pretrained_models/VRT/003_VRT_videosr_bi_Vimeo_7frames.pth
+  strict_load_g: true
+  resume_state: experiments/VRT_Vimeo90K_BIx4/training_states/15000.state
+
+# training settings
+train:
+  ema_decay: 0.999
+  optim_g:
+    type: Adam
+    lr: !!float 4e-4
+    weight_decay: 0
+    betas: [0.9, 0.99]
+
+  scheduler:
+    type: CosineAnnealingRestartLR
+    periods: [300000]
+    restart_weights: [1]
+    eta_min: !!float 1e-7
+
+  total_iter: 300000
+  warmup_iter: -1  # no warm up
+  fix_iter: 20000      # default 20000
+  flow_lr_mul: 0.125
+  fix_keys: ['spynet', 'deform']
+
+  # losses
+  pixel_opt:
+    type: CharbonnierLoss
+    loss_weight: 1.0
+    reduction: mean
+
+# validation settings
+val:
+  val_freq: !!float 5e3
+  save_img: false
+
+  num_frame_testing: 32
+  num_frame_overlapping: 2
+  size_patch_testing: 128
+
+  metrics:
+    psnr_y: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: true
+    ssim_y: # metric name, can be arbitrary
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: true
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: !!float 5e3
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500
+
+find_unused_parameters: false
+use_static_graph: true

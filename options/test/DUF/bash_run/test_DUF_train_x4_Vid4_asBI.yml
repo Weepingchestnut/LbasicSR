@@ -1,12 +1,12 @@
 !!python/object/apply:collections.OrderedDict
 - - - name
-    - DUF_52L_train_x4_Vid4_BI_x32
+    - DUF_52L_train_x4_Vid4_BI_x9.5
   - - model_type
     - VideoBaseModel
   - - scale
     - !!python/tuple
-      - 32
-      - 32
+      - 9.5
+      - 9.5
   - - num_gpu
     - 1
   - - manual_seed

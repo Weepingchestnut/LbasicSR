@@ -10,7 +10,7 @@ datasets:
     type: VideoTestVimeo90KDataset
     dataroot_gt: datasets/vimeo90k/vimeo_septuplet/sequences
     dataroot_lq: datasets/vimeo90k/BDx4
-    meta_info_file: basicsr/data/meta_info/meta_info_Vimeo90K_test_GT.txt
+    meta_info_file: lbasicsr/data/meta_info/meta_info_Vimeo90K_test_GT.txt
     cache_data: false
     io_backend:
       type: disk

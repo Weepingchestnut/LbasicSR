@@ -1,0 +1,81 @@
+name: liif-edsr-norm_c64b16_1xb16-1000k_div2k_benchmark
+model_type: LIIFModel
+# scale: 4
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 0
+
+datasets:
+  test_1:  # the 1st test dataset
+    name: Set5
+    type: ASINRImageDataset
+    dataroot_gt: datasets/Set5/GTmod12
+    io_backend:
+      type: disk
+    reshape_gt: false
+    val_scale: !!python/tuple [4, 4]
+  
+  test_2:  # the 2nd test dataset
+    name: Set14
+    type: ASINRImageDataset
+    dataroot_gt: datasets/Set14/GTmod12
+    io_backend:
+      type: disk
+    reshape_gt: false
+    val_scale: !!python/tuple [4, 4]
+  
+  test_3:
+    name: B100
+    type: ASINRImageDataset
+    dataroot_gt: datasets/B100/GT
+    io_backend:
+      type: disk
+    reshape_gt: false
+    val_scale: !!python/tuple [4, 4]
+  
+  test_4:
+    name: Urban100
+    type: ASINRImageDataset
+    dataroot_gt: datasets/Urban100/GT
+    io_backend:
+      type: disk
+    reshape_gt: false
+    val_scale: !!python/tuple [4, 4]
+
+# network structures
+network_g:
+  type: LIIFEDSR
+  encoder:
+    type: EDSR
+    num_in_ch: 3
+    num_out_ch: 3
+    num_feat: 64
+    num_block: 16
+  imnet:
+    type: MLPRefiner
+    in_dim: 64
+    out_dim: 3
+    hidden_list: [256, 256, 256, 256]
+  local_ensemble: true
+  feat_unfold: true
+  cell_decode: true
+  eval_bsize: 30000
+
+# path
+path:
+  pretrain_network_g: experiments/liif-edsr-norm_c64b16_1xb16-1000k_div2k/models/net_g_975000.pth
+  strict_load_g: true
+
+# validation settings
+val:
+  save_img: true
+  suffix: ~  # add suffix to saved images, if None, use exp name
+
+  metrics:
+    psnr_y: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 4
+      test_y_channel: true
+    ssim_y:
+      type: calculate_ssim
+      crop_border: 4
+      test_y_channel: true
