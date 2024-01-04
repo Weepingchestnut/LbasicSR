@@ -1,7 +1,7 @@
 # general settings
-name: BasicVSR_saup_Vimeo90K_BIx2x4
+name: BasicVSR_saup_SGD_Vimeo90K_BIx2x4_300k
 model_type: ASVideoRecurrentModel
-scale: !!python/tuple [4, 4]
+# scale: !!python/tuple [4, 4]
 num_gpu: 2  # set num_gpu: 0 for cpu mode
 manual_seed: 0
 
@@ -40,8 +40,42 @@ datasets:
     prefetch_mode: cuda
     pin_memory: true
 
-  val:
-    name: Vid4
+  val_x2:
+    name: Vid4_x2
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
+
+    cache_data: True
+    io_backend:
+      type: disk
+
+    num_frame: -1  # not needed
+    # arbitrary scale dataset --------------------------
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [2, 2]
+    downsampling_mode: torch
+    # --------------------------------------------------
+  
+  val_x3:
+    name: Vid4_x3
+    type: ASVideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
+
+    cache_data: True
+    io_backend:
+      type: disk
+
+    num_frame: -1  # not needed
+    # arbitrary scale dataset --------------------------
+    use_arbitrary_scale_downsampling: true
+    downsampling_scale: !!python/tuple [3, 3]
+    downsampling_mode: torch
+    # --------------------------------------------------
+  
+  val_x4:
+    name: Vid4_x4
     type: ASVideoRecurrentTestDataset
     dataroot_gt: datasets/Vid4/GT
     dataroot_lq: datasets/Vid4/BIx4
@@ -75,18 +109,22 @@ path:
 train:
   ema_decay: 0.999
   optim_g:
-    type: Adam
+    # type: Adam
+    # lr: !!float 2e-4
+    # weight_decay: 0
+    # betas: [0.9, 0.99]
+    type: SGD
     lr: !!float 2e-4
     weight_decay: 0
-    betas: [0.9, 0.99]
+    momentum: 0.9
 
   scheduler:
     type: CosineAnnealingRestartLR
-    periods: [600000]
+    periods: [300000]
     restart_weights: [1]
     eta_min: !!float 1e-7
 
-  total_iter: 600000
+  total_iter: 300000
   warmup_iter: -1  # no warm up
   fix_flow: 5000
   flow_lr_mul: 0.125

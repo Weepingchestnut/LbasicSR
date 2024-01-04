@@ -67,7 +67,7 @@ network_g:
 path:
   pretrain_network_g: ~
   strict_load_g: true
-  resume_state: ~
+  resume_state: experiments/BasicVSR_saup_Vimeo90K_BIx4/training_states/260000.state
 
 # training settings
 train:
