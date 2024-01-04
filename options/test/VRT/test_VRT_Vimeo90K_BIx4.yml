@@ -16,15 +16,15 @@ datasets:
       type: disk
     num_frame: 7
   
-  # test_2:
-  #   name: Vid4
-  #   type: VideoRecurrentTestDataset
-  #   dataroot_gt: datasets/Vid4/GT
-  #   dataroot_lq: datasets/Vid4/BIx4
-  #   cache_data: true
-  #   io_backend:
-  #     type: disk
-  #   num_frame: -1
+  test_2:
+    name: Vid4
+    type: VideoRecurrentTestDataset
+    dataroot_gt: datasets/Vid4/GT
+    dataroot_lq: datasets/Vid4/BIx4
+    cache_data: true
+    io_backend:
+      type: disk
+    num_frame: -1
 
 # network structures
 network_g:

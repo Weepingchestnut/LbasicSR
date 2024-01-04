@@ -1,4 +1,4 @@
-name: RVRT_REDS_30frames_BIx4
+name: VRT_REDS_6frames_BIx4
 model_type: VRTModel
 scale: 4
 num_gpu: 1  # set num_gpu: 0 for cpu mode
@@ -17,29 +17,21 @@ datasets:
 
 # network structures
 network_g:
-  type: RVRT
+  type: VRT
   upscale: 4
-  clip_size: 2
-  img_size: [2, 64, 64]
-  window_size: [2, 8, 8]
-  num_blocks: [1, 2, 1]
-  depths: [2, 2, 2]
-  embed_dims: [144, 144, 144]
-  num_heads: [6, 6, 6]
-  inputconv_groups: [1, 1, 1, 1, 1, 1]
-  spynet_path: experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  img_size: [6, 64, 64]
+  window_size: [6, 8, 8]
+  depths: [8,8,8,8,8,8,8, 4,4,4,4, 4,4]
+  indep_reconsts: [11, 12]
+  embed_dims: [120,120,120,120,120,120,120, 180,180,180,180, 180,180]
+  num_heads: [6,6,6,6,6,6,6, 6,6,6,6, 6,6]
+  # spynet_path: experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth
+  pa_frames: 2
   deformable_groups: 12
-  attention_heads: 12
-  attention_window: [3, 3]
-  use_checkpoint_attn: false
-  use_checkpoint_ffn: false
-  no_checkpoint_attn_blocks: []
-  no_checkpoint_ffn_blocks: []
-  cpu_cache_length: 100
 
 # path
 path:
-  pretrain_network_g: experiments/RVRT_REDS_30frames_BIx4/models/net_g_600000.pth   # official: experiments/pretrained_models/RVRT/001_RVRT_videosr_bi_REDS_30frames.pth
+  pretrain_network_g: experiments/pretrained_models/VRT/001_VRT_videosr_bi_REDS_6frames.pth
   strict_load_g: true
 
 # validation settings
@@ -47,7 +39,7 @@ val:
   save_img: true
   suffix: ~  # add suffix to saved images, if None, use exp name
 
-  num_frame_testing: 0            # official: 100, for REDS4, 0 means all frames, e.g. 100 frames
+  num_frame_testing: 40
   num_frame_overlapping: 2
   size_patch_testing: 128
   overlap_size: 20
@@ -61,3 +53,5 @@ val:
       type: calculate_ssim
       crop_border: 0
       test_y_channel: false
+
+# python main_test_vrt.py --task 001_VRT_videosr_bi_REDS_6frames --folder_lq testsets/REDS4/sharp_bicubic --folder_gt testsets/REDS4/GT --tile 40 128 128 --tile_overlap 2 20 20
