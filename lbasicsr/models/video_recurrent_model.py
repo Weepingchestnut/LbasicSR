@@ -176,7 +176,7 @@ class VideoRecurrentModel(VideoBaseModel):
                 self._log_validation_metric_values(current_iter, dataset_name, tb_logger)
 
     def test(self):
-        n = self.lq.size(1)     # 当前视频序列帧数
+        n = self.lq.size(1)     # frames number of current video sequence
         self.net_g.eval()
 
         flip_seq = self.opt['val'].get('flip_seq', False)
@@ -187,8 +187,8 @@ class VideoRecurrentModel(VideoBaseModel):
 
         with torch.no_grad():
             # set network's current scale
-            if hasattr(self.net_g, 'set_scale') and hasattr(self, 'scale'):
-                self.net_g.set_scale(self.scale)
+            # if hasattr(self.net_g, 'set_scale') and hasattr(self, 'scale'):
+            #     self.net_g.set_scale(self.scale)
             self.output = self.net_g(self.lq)
 
         if flip_seq:
@@ -220,7 +220,7 @@ class ASVideoRecurrentModel(VideoRecurrentModel):
         super(ASVideoRecurrentModel, self).optimize_parameters(current_iter)
     
     def test(self):
-        n = self.lq.size(1)     # 当前视频序列帧数
+        n = self.lq.size(1)     # frames number of current video sequence
         self.net_g.eval()
 
         flip_seq = self.opt['val'].get('flip_seq', False)
@@ -230,6 +230,7 @@ class ASVideoRecurrentModel(VideoRecurrentModel):
             self.lq = torch.cat([self.lq, self.lq.flip(1)], dim=1)
 
         with torch.no_grad():
+            # set network's current scale
             if isinstance(self.net_g, (DataParallel, DistributedDataParallel)):
                 self.net_g.module.set_scale(self.scale)
             else:

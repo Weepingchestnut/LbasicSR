@@ -4,10 +4,11 @@ from copy import deepcopy
 from lbasicsr.utils import get_root_logger
 from lbasicsr.utils.registry import MODEL_REGISTRY
 from .video_recurrent_model import VideoRecurrentModel
+from .vrt_model import VRTModel
 
 
 @MODEL_REGISTRY.register()
-class TTVSRModel(VideoRecurrentModel):
+class TTVSRModel(VRTModel):
     """TTVSR
     
     Paper:

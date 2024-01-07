@@ -249,15 +249,18 @@ class VRTModel(VideoBaseModel):
                 sf = self.opt['scale'][0]
             else:
                 sf = self.opt['scale']
+            psf = self.opt['val'].get('pre_scale')      # pretrained model upscale
             num_frame_overlapping = self.opt['val'].get('num_frame_overlapping', 2)
             not_overlap_border = False
             b, d, c, h, w = lq.size()
             c = c - 1 if self.opt['network_g'].get('nonblind_denoising', False) else c
             stride = num_frame_testing - num_frame_overlapping
             d_idx_list = list(range(0, d-num_frame_testing, stride)) + [max(0, d-num_frame_testing)]
-            if sf in [2, 3, 4]:
+            if psf:   # specified scale pretrained model
+                E = torch.zeros(b, d, c, h*psf, w*psf)
+            elif sf in [2, 3, 4]:
                 E = torch.zeros(b, d, c, h*sf, w*sf)
-            else:
+            else:   # if you have x2, x3 pretrained model
                 E = torch.zeros(b, d, c, h * (int(sf)+1), w * (int(sf)+1))
             W = torch.zeros(b, d, 1, 1, 1)
 
@@ -295,6 +298,7 @@ class VRTModel(VideoBaseModel):
             sf = self.opt['scale'][0]
         else:
             sf = self.opt['scale']
+        psf = self.opt['val'].get('pre_scale')      # pretrained model upscale
         window_size = self.opt['network_g'].get('window_size', [6, 8, 8])
         size_patch_testing = self.opt['val'].get('size_patch_testing', 0)
         assert size_patch_testing % window_size[-1] == 0, 'testing patch size should be a multiple of window_size.'
@@ -310,7 +314,10 @@ class VRTModel(VideoBaseModel):
             stride = size_patch_testing - overlap_size
             h_idx_list = list(range(0, h-size_patch_testing, stride)) + [max(0, h-size_patch_testing)]
             w_idx_list = list(range(0, w-size_patch_testing, stride)) + [max(0, w-size_patch_testing)]
-            if sf in [2, 3, 4]:
+            
+            if psf:    # specified scale pretrained model
+                E = torch.zeros(b, d, c, h*psf, w*psf)
+            elif sf in [2, 3, 4]:
                 E = torch.zeros(b, d, c, h*sf, w*sf)
             else:
                 E = torch.zeros(b, d, c, h * (int(sf)+1), w * (int(sf)+1))
@@ -339,7 +346,10 @@ class VRTModel(VideoBaseModel):
                         if w_idx > w_idx_list[0]:
                             out_patch[..., :, :overlap_size//2] *= 0
                             out_patch_mask[..., :, :overlap_size//2] *= 0
-                    if sf in [2, 3, 4]:
+                    if psf:    # specified scale pretrained model
+                        E[..., h_idx*psf:(h_idx+size_patch_testing)*psf, w_idx*psf:(w_idx+size_patch_testing)*psf].add_(out_patch)
+                        W[..., h_idx*psf:(h_idx+size_patch_testing)*psf, w_idx*psf:(w_idx+size_patch_testing)*psf].add_(out_patch_mask)
+                    elif sf in [2, 3, 4]:
                         E[..., h_idx*sf:(h_idx+size_patch_testing)*sf, w_idx*sf:(w_idx+size_patch_testing)*sf].add_(out_patch)
                         W[..., h_idx*sf:(h_idx+size_patch_testing)*sf, w_idx*sf:(w_idx+size_patch_testing)*sf].add_(out_patch_mask)
                     else:
@@ -362,7 +372,9 @@ class VRTModel(VideoBaseModel):
             
             output = self.net_g(lq)
             # for arbitrary-scale VSR, use BI post-process
-            if sf in [2, 3, 4]:
+            if psf:
+                output = output[:, :, :, :h_old*psf, :w_old*psf]
+            elif sf in [2, 3, 4]:
                 output = output[:, :, :, :h_old*sf, :w_old*sf]
             else:
                 output = output[:, :, :, :h_old * (int(sf)+1), :w_old * (int(sf)+1)]
